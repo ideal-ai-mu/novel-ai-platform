@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+﻿import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
@@ -7,8 +7,20 @@ import type {
   AppliedChange,
   AiSuggestion,
   AppInitData,
+  ChapterRefs,
   Chapter,
+  ChapterRefsUpdateInput,
   ChapterCreateInput,
+  ChapterGenerateOutlineAiInput,
+  ChapterGenerateOutlineAiResult,
+  Character,
+  CharacterCreateInput,
+  CharacterUpdateInput,
+  DeleteResult,
+  EntitySource,
+  LoreEntry,
+  LoreEntryCreateInput,
+  LoreEntryUpdateInput,
   ChapterUpdateInput,
   NovelProject,
   ProjectCreateInput,
@@ -75,6 +87,14 @@ type SuggestionRow = Record<
   | 'created_at',
   unknown
 >;
+type CharacterRow = Record<
+  'id' | 'project_id' | 'name' | 'role_type' | 'summary' | 'details' | 'source' | 'created_at' | 'updated_at',
+  unknown
+>;
+type LoreEntryRow = Record<
+  'id' | 'project_id' | 'type' | 'title' | 'summary' | 'content' | 'tags_json' | 'source' | 'created_at' | 'updated_at',
+  unknown
+>;
 
 export class AppError extends Error {
   public readonly code: string;
@@ -134,6 +154,33 @@ function parseDotPathArray(value: string): string[] {
   }
 }
 
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.every((item) => typeof item === 'string') ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function ensureStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new AppError('VALIDATION_ERROR', `${fieldName} must be a string array`);
+  }
+  return value;
+}
+
+function ensureEntitySource(source: unknown): EntitySource {
+  if (source === 'user' || source === 'ai_summary' || source === 'imported') {
+    return source;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid source');
+}
+
 function mapChapter(row: ChapterRow): Chapter {
   const confirmedRaw = typeof row.confirmed_fields_json === 'string' ? row.confirmed_fields_json : '[]';
 
@@ -154,6 +201,36 @@ function mapChapter(row: ChapterRow): Chapter {
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
     source: row.source as Chapter['source']
+  };
+}
+
+function mapCharacter(row: CharacterRow): Character {
+  return {
+    id: String(row.id),
+    project_id: String(row.project_id),
+    name: String(row.name),
+    role_type: String(row.role_type ?? ''),
+    summary: String(row.summary ?? ''),
+    details: String(row.details ?? ''),
+    source: row.source as Character['source'],
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at)
+  };
+}
+
+function mapLoreEntry(row: LoreEntryRow): LoreEntry {
+  const tagsRaw = typeof row.tags_json === 'string' ? row.tags_json : '[]';
+  return {
+    id: String(row.id),
+    project_id: String(row.project_id),
+    type: String(row.type),
+    title: String(row.title),
+    summary: String(row.summary ?? ''),
+    content: String(row.content ?? ''),
+    tags_json: parseStringArray(tagsRaw),
+    source: row.source as LoreEntry['source'],
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at)
   };
 }
 
@@ -232,25 +309,94 @@ function normalizeChapterPatchValue(field: string, value: unknown): string | nul
   return value;
 }
 
-function buildDefaultPatch(entityType: string): Record<string, unknown> {
-  if (entityType === 'Chapter') {
+function compactText(value: string, limit: number): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return `${normalized.slice(0, limit).trimEnd()}...`;
+}
+
+function buildOutlineAiText(chapter: Chapter, characters: Character[], loreEntries: LoreEntry[]): string {
+  const goal = compactText(chapter.goal, 80) || '尚未填写本章目标，可先明确本章要推进的核心冲突。';
+  const outlineUser = compactText(chapter.outline_user, 140) || '当前本章梗概为空，可以先给出一版结构化规划。';
+  const nextHook = compactText(chapter.next_hook, 80) || '尚未填写章末钩子，建议在结尾留下新的信息差或危险信号。';
+  const contentContext = compactText(chapter.content, 180) || '当前正文较少，可先建立场景压力，再把核心冲突推到台前。';
+  const characterNames = characters.length > 0 ? characters.map((item) => item.name).join('、') : '暂无关联角色';
+  const loreTitles = loreEntries.length > 0 ? loreEntries.map((item) => item.title).join('、') : '暂无关联设定';
+  const chapterLabel = chapter.title.trim() || `第${chapter.index_no}章`;
+
+  return [
+    `建议版《${chapterLabel}》章节梗概：`,
+    `围绕“${goal}”推进本章主线。`,
+    `延续当前梗概：${outlineUser}`,
+    `正文应重点呈现：${contentContext}`,
+    `角色牵引：${characterNames}`,
+    `设定牵引：${loreTitles}`,
+    `结尾建议落在：${nextHook}`
+  ].join('\n');
+}
+
+function buildOutlineUserSuggestionValue(chapter: Chapter): string {
+  const goal = compactText(chapter.goal, 80);
+  const contentSummary = compactText(chapter.content, 140);
+  const nextHook = compactText(chapter.next_hook, 80);
+  const lines = [
+    goal ? `目标：${goal}` : `目标：推进 ${chapter.title.trim() || `第${chapter.index_no}章`} 的核心冲突。`,
+    contentSummary ? `本章梗概：${contentSummary}` : '本章梗概：先建立压力场景，再逐步揭示新的阻力。',
+    nextHook ? `章末钩子：${nextHook}` : '章末钩子：结尾需要留下新的悬念或代价。'
+  ];
+
+  return lines.join('\n');
+}
+
+function buildMockChapterSuggestion(
+  chapter: Chapter,
+  existingCount: number
+): {
+  kind: string;
+  summary: string;
+  patch: Record<string, unknown>;
+} {
+  const chapterLabel = chapter.title.trim() || `第${chapter.index_no}章`;
+
+  if (existingCount % 2 === 0) {
     return {
-      changes: [
-        {
-          field: 'next_hook',
-          value: '主角在雨夜收到一封没有署名的警告信。'
-        }
-      ]
+      kind: 'mock.chapter.planning',
+      summary: 'Mock 建议：补强章节规划层',
+      patch: {
+        changes: [
+          {
+            field: 'goal',
+            value: chapter.goal.trim() || `让 ${chapterLabel} 更早暴露核心冲突与代价。`
+          },
+          {
+            field: 'next_hook',
+            value: chapter.next_hook.trim() || '章末加入新的警告、误导或更高风险的线索。'
+          }
+        ]
+      }
     };
   }
 
+  const contentValue = chapter.content.trim()
+    ? `${chapter.content.trim()}\n\n风声忽然停住，主角这才意识到真正的危险已经贴近。`
+    : '本章可以先让主角处于被动局面，再通过一条异常信息把冲突推到台前。';
+
   return {
-    changes: [
-      {
-        field: 'title',
-        value: 'Mock 建议变更'
-      }
-    ]
+    kind: 'mock.chapter.content',
+    summary: 'Mock 建议：补强正文层',
+    patch: {
+      changes: [
+        {
+          field: 'content',
+          value: contentValue
+        }
+      ]
+    }
   };
 }
 
@@ -285,7 +431,7 @@ export class AppDatabase {
     }
   }
 
-  public getInitData(): AppInitData {
+  public getInitData(): Omit<AppInitData, 'autosaveIntervalSeconds'> {
     const row = this.queryOne<{ value: unknown }>("SELECT value FROM app_meta WHERE key = 'schema_version'");
     const schemaVersion =
       row && typeof row.value === 'string'
@@ -354,6 +500,42 @@ export class AppDatabase {
       updated_at: String(row.updated_at),
       source: row.source as NovelProject['source']
     };
+  }
+
+  public getProject(projectId: string): NovelProject {
+    const row = this.queryOne<ProjectRow>(
+      `SELECT id, title, description, created_at, updated_at, source
+       FROM novel_projects
+       WHERE id = ?`,
+      [projectId]
+    );
+
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'Project not found');
+    }
+
+    return {
+      id: String(row.id),
+      title: String(row.title),
+      description: String(row.description ?? ''),
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+      source: row.source as NovelProject['source']
+    };
+  }
+
+  public deleteProject(projectId: string): DeleteResult {
+    this.getProject(projectId);
+
+    const chapterIdRows = this.queryAll<{ id: unknown }>('SELECT id FROM chapters WHERE project_id = ?', [projectId]);
+    if (chapterIdRows.length > 0) {
+      const chapterIds = chapterIdRows.map((row) => String(row.id));
+      this.deleteChapterSuggestions(chapterIds);
+    }
+
+    this.run('DELETE FROM novel_projects WHERE id = ?', [projectId]);
+    this.persist();
+    return { deleted: true };
   }
 
   public listChapters(projectId: string): Chapter[] {
@@ -534,6 +716,297 @@ export class AppDatabase {
     return this.getChapterOrThrow(input.chapterId);
   }
 
+  public deleteChapter(chapterId: string): DeleteResult {
+    this.getChapterOrThrow(chapterId);
+    this.deleteChapterSuggestions([chapterId]);
+    this.run('DELETE FROM chapters WHERE id = ?', [chapterId]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public getChapterRefs(chapterId: string): ChapterRefs {
+    const chapter = this.getChapterOrThrow(chapterId);
+
+    const characterRows = this.queryAll<{ character_id: unknown }>(
+      `SELECT character_id
+       FROM chapter_character_links
+       WHERE chapter_id = ?
+       ORDER BY rowid ASC`,
+      [chapterId]
+    );
+
+    const loreRows = this.queryAll<{ lore_entry_id: unknown }>(
+      `SELECT lore_entry_id
+       FROM chapter_lore_links
+       WHERE chapter_id = ?
+       ORDER BY rowid ASC`,
+      [chapterId]
+    );
+
+    return {
+      chapterId: chapter.id,
+      characterIds: characterRows.map((row) => String(row.character_id)),
+      loreEntryIds: loreRows.map((row) => String(row.lore_entry_id))
+    };
+  }
+
+  public updateChapterRefs(input: ChapterRefsUpdateInput): ChapterRefs {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const characterIds = Array.from(new Set(ensureStringArray(input.characterIds, 'characterIds')));
+    const loreEntryIds = Array.from(new Set(ensureStringArray(input.loreEntryIds, 'loreEntryIds')));
+
+    this.validateProjectEntityIds('characters', chapter.project_id, characterIds, 'Character');
+    this.validateProjectEntityIds('lore_entries', chapter.project_id, loreEntryIds, 'LoreEntry');
+
+    this.run('BEGIN');
+    try {
+      this.run('DELETE FROM chapter_character_links WHERE chapter_id = ?', [chapter.id]);
+      this.run('DELETE FROM chapter_lore_links WHERE chapter_id = ?', [chapter.id]);
+
+      for (const characterId of characterIds) {
+        this.run(
+          `INSERT INTO chapter_character_links (chapter_id, character_id, created_at)
+           VALUES (?, ?, ?)`,
+          [chapter.id, characterId, nowIso()]
+        );
+      }
+
+      for (const loreEntryId of loreEntryIds) {
+        this.run(
+          `INSERT INTO chapter_lore_links (chapter_id, lore_entry_id, created_at)
+           VALUES (?, ?, ?)`,
+          [chapter.id, loreEntryId, nowIso()]
+        );
+      }
+
+      this.run('COMMIT');
+    } catch (error) {
+      this.run('ROLLBACK');
+      throw error;
+    }
+
+    this.persist();
+    return this.getChapterRefs(chapter.id);
+  }
+
+  public listCharacters(projectId: string): Character[] {
+    const rows = this.queryAll<CharacterRow>(
+      `SELECT id, project_id, name, role_type, summary, details, source, created_at, updated_at
+       FROM characters
+       WHERE project_id = ?
+       ORDER BY updated_at DESC, created_at DESC`,
+      [projectId]
+    );
+
+    return rows.map(mapCharacter);
+  }
+
+  public createCharacter(input: CharacterCreateInput): Character {
+    this.getProject(input.projectId);
+    const name = (input.name ?? '').trim();
+    if (!name) {
+      throw new AppError('VALIDATION_ERROR', 'Character name is required');
+    }
+
+    const id = randomUUID();
+    const timestamp = nowIso();
+    const roleType = input.roleType ?? '';
+    const summary = input.summary ?? '';
+    const details = input.details ?? '';
+    const source = input.source ?? 'user';
+
+    this.run(
+      `INSERT INTO characters (id, project_id, name, role_type, summary, details, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, input.projectId, name, roleType, summary, details, ensureEntitySource(source), timestamp, timestamp]
+    );
+    this.persist();
+
+    return this.getCharacterOrThrow(id);
+  }
+
+  public getCharacter(characterId: string): Character {
+    return this.getCharacterOrThrow(characterId);
+  }
+
+  public updateCharacter(input: CharacterUpdateInput): Character {
+    const current = this.getCharacterOrThrow(input.characterId);
+    const patch = input.patch ?? {};
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    const assign = (column: string, value: unknown) => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (typeof patch.name === 'string') {
+      const name = patch.name.trim();
+      if (!name) {
+        throw new AppError('VALIDATION_ERROR', 'Character name cannot be empty');
+      }
+      assign('name', name);
+    }
+    if (typeof patch.role_type === 'string') {
+      assign('role_type', patch.role_type);
+    }
+    if (typeof patch.summary === 'string') {
+      assign('summary', patch.summary);
+    }
+    if (typeof patch.details === 'string') {
+      assign('details', patch.details);
+    }
+    if (patch.source !== undefined) {
+      assign('source', ensureEntitySource(patch.source));
+    }
+
+    if (sets.length === 0) {
+      return current;
+    }
+
+    assign('updated_at', nowIso());
+    values.push(input.characterId);
+    this.run(`UPDATE characters SET ${sets.join(', ')} WHERE id = ?`, values);
+    this.persist();
+    return this.getCharacterOrThrow(input.characterId);
+  }
+
+  public deleteCharacter(characterId: string): DeleteResult {
+    this.getCharacterOrThrow(characterId);
+    this.run('DELETE FROM characters WHERE id = ?', [characterId]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public listLoreEntries(projectId: string): LoreEntry[] {
+    const rows = this.queryAll<LoreEntryRow>(
+      `SELECT id, project_id, type, title, summary, content, tags_json, source, created_at, updated_at
+       FROM lore_entries
+       WHERE project_id = ?
+       ORDER BY updated_at DESC, created_at DESC`,
+      [projectId]
+    );
+
+    return rows.map(mapLoreEntry);
+  }
+
+  public createLoreEntry(input: LoreEntryCreateInput): LoreEntry {
+    this.getProject(input.projectId);
+    const type = (input.type ?? '').trim();
+    const title = (input.title ?? '').trim();
+    if (!type) {
+      throw new AppError('VALIDATION_ERROR', 'LoreEntry type is required');
+    }
+    if (!title) {
+      throw new AppError('VALIDATION_ERROR', 'LoreEntry title is required');
+    }
+
+    const id = randomUUID();
+    const timestamp = nowIso();
+    const summary = input.summary ?? '';
+    const content = input.content ?? '';
+    const tags = input.tagsJson ?? [];
+    const source = input.source ?? 'user';
+
+    this.run(
+      `INSERT INTO lore_entries (id, project_id, type, title, summary, content, tags_json, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        input.projectId,
+        type,
+        title,
+        summary,
+        content,
+        JSON.stringify(ensureStringArray(tags, 'tagsJson')),
+        ensureEntitySource(source),
+        timestamp,
+        timestamp
+      ]
+    );
+    this.persist();
+
+    return this.getLoreEntryOrThrow(id);
+  }
+
+  public getLoreEntry(loreEntryId: string): LoreEntry {
+    return this.getLoreEntryOrThrow(loreEntryId);
+  }
+
+  public updateLoreEntry(input: LoreEntryUpdateInput): LoreEntry {
+    const current = this.getLoreEntryOrThrow(input.loreEntryId);
+    const patch = input.patch ?? {};
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    const assign = (column: string, value: unknown) => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (typeof patch.type === 'string') {
+      const type = patch.type.trim();
+      if (!type) {
+        throw new AppError('VALIDATION_ERROR', 'LoreEntry type cannot be empty');
+      }
+      assign('type', type);
+    }
+    if (typeof patch.title === 'string') {
+      const title = patch.title.trim();
+      if (!title) {
+        throw new AppError('VALIDATION_ERROR', 'LoreEntry title cannot be empty');
+      }
+      assign('title', title);
+    }
+    if (typeof patch.summary === 'string') {
+      assign('summary', patch.summary);
+    }
+    if (typeof patch.content === 'string') {
+      assign('content', patch.content);
+    }
+    if (patch.tags_json !== undefined) {
+      assign('tags_json', JSON.stringify(ensureStringArray(patch.tags_json, 'tags_json')));
+    }
+    if (patch.source !== undefined) {
+      assign('source', ensureEntitySource(patch.source));
+    }
+
+    if (sets.length === 0) {
+      return current;
+    }
+
+    assign('updated_at', nowIso());
+    values.push(input.loreEntryId);
+    this.run(`UPDATE lore_entries SET ${sets.join(', ')} WHERE id = ?`, values);
+    this.persist();
+    return this.getLoreEntryOrThrow(input.loreEntryId);
+  }
+
+  public deleteLoreEntry(loreEntryId: string): DeleteResult {
+    this.getLoreEntryOrThrow(loreEntryId);
+    this.run('DELETE FROM lore_entries WHERE id = ?', [loreEntryId]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public generateChapterOutlineAi(input: ChapterGenerateOutlineAiInput): ChapterGenerateOutlineAiResult {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const linkedCharacters = this.listChapterCharacters(chapter.id);
+    const linkedLoreEntries = this.listChapterLoreEntries(chapter.id);
+    const outlineAi = buildOutlineAiText(chapter, linkedCharacters, linkedLoreEntries);
+    const updatedChapter = this.updateChapter({
+      chapterId: chapter.id,
+      patch: {
+        outline_ai: outlineAi
+      }
+    });
+
+    return {
+      chapter: updatedChapter,
+      suggestion: null
+    };
+  }
+
   public listSuggestionsByEntity(input: SuggestionListByEntityInput): AiSuggestion[] {
     if (input.entityType !== 'Chapter') {
       throw new AppError('VALIDATION_ERROR', 'Only Chapter suggestion is supported in this sprint');
@@ -558,9 +1031,15 @@ export class AppDatabase {
       throw new AppError('VALIDATION_ERROR', 'Only Chapter suggestion is supported in this sprint');
     }
 
+    const chapter = this.getChapterOrThrow(input.entityId);
+    const existingCountRow = this.queryOne<{ total: unknown }>(
+      'SELECT COUNT(*) AS total FROM ai_suggestions WHERE entity_type = ? AND entity_id = ?',
+      [input.entityType, input.entityId]
+    );
+    const existingCount = existingCountRow ? Number(existingCountRow.total ?? 0) : 0;
+    const payload = buildMockChapterSuggestion(chapter, existingCount);
     const timestamp = nowIso();
     const id = randomUUID();
-    const patch = buildDefaultPatch(input.entityType);
 
     this.run(
       `INSERT INTO ai_suggestions (
@@ -570,10 +1049,10 @@ export class AppDatabase {
         id,
         input.entityType,
         input.entityId,
-        'mock.patch',
-        JSON.stringify(patch),
+        payload.kind,
+        JSON.stringify(payload.patch),
         'pending',
-        'Mock 建议：可用于联调右侧建议面板',
+        payload.summary,
         'mock',
         JSON.stringify({ appliedChanges: [], blockedFields: [] }),
         timestamp
@@ -581,18 +1060,7 @@ export class AppDatabase {
     );
     this.persist();
 
-    const row = this.queryOne<SuggestionRow>(
-      `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, result_json, created_at
-       FROM ai_suggestions
-       WHERE id = ?`,
-      [id]
-    );
-
-    if (!row) {
-      throw new AppError('INTERNAL_ERROR', 'Failed to read created suggestion');
-    }
-
-    return mapSuggestion(row);
+    return this.getSuggestionOrThrow(id);
   }
 
   public applySuggestion(input: SuggestionApplyInput): SuggestionApplyResult {
@@ -743,6 +1211,92 @@ export class AppDatabase {
     return mapChapter(row);
   }
 
+  private getCharacterOrThrow(characterId: string): Character {
+    const row = this.queryOne<CharacterRow>(
+      `SELECT id, project_id, name, role_type, summary, details, source, created_at, updated_at
+       FROM characters
+       WHERE id = ?`,
+      [characterId]
+    );
+
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'Character not found');
+    }
+
+    return mapCharacter(row);
+  }
+
+  private getLoreEntryOrThrow(loreEntryId: string): LoreEntry {
+    const row = this.queryOne<LoreEntryRow>(
+      `SELECT id, project_id, type, title, summary, content, tags_json, source, created_at, updated_at
+       FROM lore_entries
+       WHERE id = ?`,
+      [loreEntryId]
+    );
+
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'LoreEntry not found');
+    }
+
+    return mapLoreEntry(row);
+  }
+
+  private listChapterCharacters(chapterId: string): Character[] {
+    const rows = this.queryAll<CharacterRow>(
+      `SELECT c.id, c.project_id, c.name, c.role_type, c.summary, c.details, c.source, c.created_at, c.updated_at
+       FROM characters c
+       INNER JOIN chapter_character_links links ON links.character_id = c.id
+       WHERE links.chapter_id = ?
+       ORDER BY links.created_at ASC`,
+      [chapterId]
+    );
+
+    return rows.map(mapCharacter);
+  }
+
+  private listChapterLoreEntries(chapterId: string): LoreEntry[] {
+    const rows = this.queryAll<LoreEntryRow>(
+      `SELECT l.id, l.project_id, l.type, l.title, l.summary, l.content, l.tags_json, l.source, l.created_at, l.updated_at
+       FROM lore_entries l
+       INNER JOIN chapter_lore_links links ON links.lore_entry_id = l.id
+       WHERE links.chapter_id = ?
+       ORDER BY links.created_at ASC`,
+      [chapterId]
+    );
+
+    return rows.map(mapLoreEntry);
+  }
+
+  private validateProjectEntityIds(
+    tableName: 'characters' | 'lore_entries',
+    projectId: string,
+    ids: string[],
+    entityLabel: string
+  ): void {
+    if (ids.length === 0) {
+      return;
+    }
+
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = this.queryAll<{ id: unknown }>(
+      `SELECT id FROM ${tableName} WHERE project_id = ? AND id IN (${placeholders})`,
+      [projectId, ...ids]
+    );
+    const foundIds = new Set(rows.map((row) => String(row.id)));
+    const missing = ids.filter((id) => !foundIds.has(id));
+    if (missing.length > 0) {
+      throw new AppError('VALIDATION_ERROR', `${entityLabel} does not exist in selected project: ${missing.join(', ')}`);
+    }
+  }
+
+  private deleteChapterSuggestions(chapterIds: string[]): void {
+    if (chapterIds.length === 0) {
+      return;
+    }
+    const placeholders = chapterIds.map(() => '?').join(', ');
+    this.run(`DELETE FROM ai_suggestions WHERE entity_type = 'Chapter' AND entity_id IN (${placeholders})`, chapterIds);
+  }
+
   private bootstrapSchema(): void {
     this.run(`
       CREATE TABLE IF NOT EXISTS app_meta (
@@ -779,6 +1333,51 @@ export class AppDatabase {
         FOREIGN KEY(project_id) REFERENCES novel_projects(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS characters (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role_type TEXT NOT NULL DEFAULT '',
+        summary TEXT NOT NULL DEFAULT '',
+        details TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES novel_projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS lore_entries (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '',
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES novel_projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_character_links (
+        chapter_id TEXT NOT NULL,
+        character_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (chapter_id, character_id),
+        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(character_id) REFERENCES characters(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_lore_links (
+        chapter_id TEXT NOT NULL,
+        lore_entry_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (chapter_id, lore_entry_id),
+        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(lore_entry_id) REFERENCES lore_entries(id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS ai_suggestions (
         id TEXT PRIMARY KEY,
         entity_type TEXT NOT NULL,
@@ -793,6 +1392,10 @@ export class AppDatabase {
       );
 
       CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, index_no);
+      CREATE INDEX IF NOT EXISTS idx_characters_project ON characters(project_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_lore_project ON lore_entries(project_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_chapter_character_links_chapter ON chapter_character_links(chapter_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_lore_links_chapter ON chapter_lore_links(chapter_id);
       CREATE INDEX IF NOT EXISTS idx_suggestions_entity ON ai_suggestions(entity_type, entity_id, created_at);
     `);
 
@@ -899,3 +1502,4 @@ export class AppDatabase {
 }
 
 export const appDatabase = new AppDatabase();
+
