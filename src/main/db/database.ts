@@ -535,6 +535,10 @@ export class AppDatabase {
   }
 
   public listSuggestionsByEntity(input: SuggestionListByEntityInput): AiSuggestion[] {
+    if (input.entityType !== 'Chapter') {
+      throw new AppError('VALIDATION_ERROR', 'Only Chapter suggestion is supported in this sprint');
+    }
+
     const rows = this.queryAll<SuggestionRow>(
       `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, result_json, created_at
        FROM ai_suggestions
@@ -549,6 +553,9 @@ export class AppDatabase {
   public createMockSuggestion(input: SuggestionCreateMockInput): AiSuggestion {
     if (!input.entityType || !input.entityId) {
       throw new AppError('VALIDATION_ERROR', 'entityType and entityId are required');
+    }
+    if (input.entityType !== 'Chapter') {
+      throw new AppError('VALIDATION_ERROR', 'Only Chapter suggestion is supported in this sprint');
     }
 
     const timestamp = nowIso();
