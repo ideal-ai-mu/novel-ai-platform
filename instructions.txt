@@ -1,0 +1,228 @@
+# 这个文档记录已经给出的指令
+
+I1
+请先不要改代码。
+
+阅读 @README.md product.md mvp.md desktop-architecture.md
+
+这是一个 Windows 桌面应用，不是网站。
+我希望你优先按 Electron + React + TypeScript 的方向设计。
+
+请先输出：
+1. 推荐技术栈
+2. 项目目录结构
+3. 数据模型
+4. MVP 开发顺序
+5. 桌面端 UI 布局建议
+6. 本地数据存储方案
+
+要求：
+- 先输出方案，不要直接编码
+- 用户确认内容优先级最高
+- AI 不允许自动覆盖 user_confirmed 内容
+
+I2
+请不要直接开始大规模编码。
+
+基于你刚才给出的方案，在仓库中新增并完善以下文档：
+1. docs/architecture.md
+2. docs/data-model.md
+3. docs/ipc-plan.md
+4. docs/mvp-sprint-1.md
+
+要求：
+- architecture.md 说明整体分层：main process、renderer、preload、local storage、AI layer
+- data-model.md 先定义核心实体：NovelProject、Character、LoreEntry、Chapter、Foreshadowing、TimelineEvent、AiSuggestion
+- ipc-plan.md 先只列第一阶段需要的 IPC，不要过度设计
+- mvp-sprint-1.md 只写第一阶段最小可运行目标
+
+输出要求：
+- 先告诉我你准备创建/修改哪些文件
+- 然后再写入文档
+- 不要开始实现 UI 和数据库代码
+
+
+I3
+请先不要开始正式编码，先修正文档。
+
+阅读并修改：
+@docs/architecture.md
+@docs/data-model.md
+@docs/ipc-plan.md
+@docs/mvp-sprint-1.md
+
+请按以下要求修正：
+
+1. 明确 Sprint 1 的存储拓扑：
+   - 先采用“单应用 SQLite + 多 NovelProject”的方案
+   - 暂不实现“每项目一个目录 + project.db”的物理结构
+   - 但在 architecture.md 中保留后续可演进方向说明
+
+2. 补充 Chapter 字段：
+   - status
+   - goal
+   - outline_ai
+   - outline_user
+   - next_hook
+
+3. 为核心实体补充最小来源/状态语义：
+   - 建议加入 source 字段
+   - 必要时加入 status 字段
+   - 保持 Sprint 1 实现简单，不要引入复杂审计系统
+
+4. 明确 confirmed_fields_json 的字段路径格式：
+   - 统一使用 dot-path
+   - 在 data-model.md 中给出示例
+
+5. 优化 suggestion.apply 的返回结构：
+   - status
+   - appliedChanges
+   - blockedFields
+
+6. 可以补充一个最小 app.init IPC，用于应用启动初始化
+
+要求：
+- 先输出你准备修改哪些文件和修改点
+- 然后再修改文档
+- 不要开始 UI 和数据库实现
+
+I4
+现在开始第一轮正式编码。
+
+请阅读并遵守：
+@docs/architecture.md
+@docs/data-model.md
+@docs/ipc-plan.md
+@docs/mvp-sprint-1.md
+
+本轮目标：
+1. 初始化一个可运行的 Windows 桌面应用工程
+2. 技术栈使用 Electron + React + TypeScript
+3. 建立清晰目录结构：
+   - src/main
+   - src/preload
+   - src/renderer
+   - src/shared
+4. 先实现一个三栏静态 UI 壳子：
+   - 左侧：项目/章节导航占位
+   - 中间：正文编辑区占位
+   - 右侧：AI 建议与待确认更新面板占位
+5. 先打通最小 preload API 和 app.init 调用链，但 app.init 可以先返回 mock 数据
+6. 本轮不接 SQLite
+7. 本轮不接真实 AI 接口
+8. 本轮不实现业务 CRUD
+
+要求：
+- 先输出你准备创建/修改的文件
+- 再开始编码
+- 不要顺手实现无关功能
+- 保持后续方便接入 IPC 和本地数据层
+
+
+I5
+现在进入第二轮正式编码。
+
+请阅读并遵守：
+@docs/architecture.md
+@docs/data-model.md
+@docs/ipc-plan.md
+@docs/mvp-sprint-1.md
+
+第二轮目标：
+1. 接入 SQLite 本地存储
+2. 将 app.init 从 mock 改为真实初始化逻辑
+3. 实现最小数据层与最小 IPC
+4. 只覆盖以下实体：
+   - NovelProject
+   - Chapter
+   - AiSuggestion
+
+本轮具体要求：
+
+一、数据库与初始化
+- 在 main 侧实现 SQLite 初始化
+- 应用启动时执行 app.init
+- app.init 至少返回：
+  - schemaVersion
+  - dbPath
+  - topology
+  - recentProjects
+- 先不要实现复杂 migration 系统，但要保留后续扩展空间
+
+二、实体范围
+只实现以下最小字段：
+
+1. NovelProject
+- id
+- title
+- description
+- created_at
+- updated_at
+- source
+
+2. Chapter
+- id
+- project_id
+- index_no
+- title
+- status
+- goal
+- outline_ai
+- outline_user
+- content
+- next_hook
+- word_count
+- revision
+- confirmed_fields_json
+- created_at
+- updated_at
+- source
+
+3. AiSuggestion
+- id
+- entity_type
+- entity_id
+- kind
+- patch_json
+- status
+- summary
+- source
+- created_at
+
+三、IPC 范围
+只实现这些 IPC：
+- app.init
+- project.list
+- project.create
+- chapter.list
+- chapter.create
+- chapter.get
+- chapter.update
+- suggestion.listByEntity
+- suggestion.createMock
+
+四、行为约束
+- 不允许 AI/建议自动覆盖 user confirmed 字段
+- confirmed_fields_json 使用 dot-path
+- 本轮 suggestion.createMock 只写入 mock 建议数据，不接真实 AI
+- 不实现 Character / LoreEntry / Foreshadowing / TimelineEvent 的 CRUD
+- 不实现导入导出
+- 不实现一致性检查
+
+五、UI 范围
+- 在现有三栏壳子上接最小交互
+- 左侧可显示项目与章节列表
+- 中间可编辑并保存当前章节正文
+- 右侧可显示当前章节对应的 suggestion 列表
+- UI 先以可用为主，不追求美化
+
+输出要求：
+1. 先输出你准备创建/修改的文件
+2. 说明数据库接入方案与 IPC 落点
+3. 然后再开始编码
+4. 不要顺手实现无关功能
+5. 完成后给出：
+   - 已实现功能
+   - 未实现功能
+   - 验证命令
+   - 下一轮建议
