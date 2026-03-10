@@ -4,6 +4,7 @@ import path from 'node:path';
 import initSqlJs from 'sql.js';
 import { app } from 'electron';
 import type {
+  AppliedChange,
   AiSuggestion,
   AppInitData,
   Chapter,
@@ -11,7 +12,12 @@ import type {
   ChapterUpdateInput,
   NovelProject,
   ProjectCreateInput,
+  SuggestionApplyInput,
+  SuggestionApplyResult,
   SuggestionCreateMockInput,
+  SuggestionRejectInput,
+  SuggestionRejectResult,
+  SuggestionResult,
   SuggestionListByEntityInput
 } from '../../shared/ipc';
 
@@ -57,7 +63,16 @@ type ChapterRow = Record<
   unknown
 >;
 type SuggestionRow = Record<
-  'id' | 'entity_type' | 'entity_id' | 'kind' | 'patch_json' | 'status' | 'summary' | 'source' | 'created_at',
+  | 'id'
+  | 'entity_type'
+  | 'entity_id'
+  | 'kind'
+  | 'patch_json'
+  | 'status'
+  | 'summary'
+  | 'source'
+  | 'result_json'
+  | 'created_at',
   unknown
 >;
 
@@ -144,6 +159,7 @@ function mapChapter(row: ChapterRow): Chapter {
 
 function mapSuggestion(row: SuggestionRow): AiSuggestion {
   const patchRaw = typeof row.patch_json === 'string' ? row.patch_json : '{}';
+  const resultRaw = typeof row.result_json === 'string' ? row.result_json : '{}';
   return {
     id: String(row.id),
     entity_type: String(row.entity_type),
@@ -153,8 +169,67 @@ function mapSuggestion(row: SuggestionRow): AiSuggestion {
     status: row.status as AiSuggestion['status'],
     summary: String(row.summary),
     source: row.source as AiSuggestion['source'],
+    result_json: parseSuggestionResult(resultRaw),
     created_at: String(row.created_at)
   };
+}
+
+function parseSuggestionResult(value: string): SuggestionResult {
+  const parsed = parseJsonObject(value);
+  const rawApplied = parsed.appliedChanges;
+  const rawBlocked = parsed.blockedFields;
+
+  const appliedChanges: AppliedChange[] = Array.isArray(rawApplied)
+    ? rawApplied
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .map((item) => ({
+          field: String(item.field ?? ''),
+          previousValue: item.previousValue,
+          newValue: item.newValue
+        }))
+        .filter((item) => item.field.length > 0)
+    : [];
+
+  const blockedFields =
+    Array.isArray(rawBlocked) && rawBlocked.every((item) => typeof item === 'string')
+      ? (rawBlocked as string[])
+      : [];
+
+  return {
+    appliedChanges,
+    blockedFields
+  };
+}
+
+type PatchChange = { field: string; value: unknown };
+
+function parsePatchChanges(patch: Record<string, unknown>): PatchChange[] {
+  const raw = patch.changes;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      field: typeof item.field === 'string' ? item.field : '',
+      value: item.value
+    }))
+    .filter((item) => item.field.length > 0);
+}
+
+function normalizeChapterPatchValue(field: string, value: unknown): string | null {
+  if (field === 'status') {
+    if (value === 'draft' || value === 'review' || value === 'final') {
+      return value;
+    }
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+  return value;
 }
 
 function buildDefaultPatch(entityType: string): Record<string, unknown> {
@@ -461,7 +536,7 @@ export class AppDatabase {
 
   public listSuggestionsByEntity(input: SuggestionListByEntityInput): AiSuggestion[] {
     const rows = this.queryAll<SuggestionRow>(
-      `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, created_at
+      `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, result_json, created_at
        FROM ai_suggestions
        WHERE entity_type = ? AND entity_id = ?
        ORDER BY created_at DESC`,
@@ -482,8 +557,8 @@ export class AppDatabase {
 
     this.run(
       `INSERT INTO ai_suggestions (
-         id, entity_type, entity_id, kind, patch_json, status, summary, source, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         id, entity_type, entity_id, kind, patch_json, status, summary, source, result_json, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.entityType,
@@ -493,13 +568,14 @@ export class AppDatabase {
         'pending',
         'Mock 建议：可用于联调右侧建议面板',
         'mock',
+        JSON.stringify({ appliedChanges: [], blockedFields: [] }),
         timestamp
       ]
     );
     this.persist();
 
     const row = this.queryOne<SuggestionRow>(
-      `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, created_at
+      `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, result_json, created_at
        FROM ai_suggestions
        WHERE id = ?`,
       [id]
@@ -510,6 +586,116 @@ export class AppDatabase {
     }
 
     return mapSuggestion(row);
+  }
+
+  public applySuggestion(input: SuggestionApplyInput): SuggestionApplyResult {
+    const suggestion = this.getSuggestionOrThrow(input.suggestionId);
+    if (suggestion.status !== 'pending') {
+      throw new AppError('VALIDATION_ERROR', 'Only pending suggestion can be applied');
+    }
+    if (suggestion.entity_type !== 'Chapter') {
+      throw new AppError('VALIDATION_ERROR', 'Only Chapter suggestion is supported in this sprint');
+    }
+
+    const chapter = this.getChapterOrThrow(suggestion.entity_id);
+    const changes = parsePatchChanges(suggestion.patch_json);
+    if (changes.length === 0) {
+      throw new AppError('VALIDATION_ERROR', 'Suggestion patch_json.changes is empty');
+    }
+
+    type ChapterSuggestionPatchField = 'title' | 'status' | 'goal' | 'outline_user' | 'next_hook' | 'content';
+    const chapterFieldMap: Record<string, ChapterSuggestionPatchField> = {
+      title: 'title',
+      status: 'status',
+      goal: 'goal',
+      outline_user: 'outline_user',
+      next_hook: 'next_hook',
+      content: 'content'
+    };
+
+    const blockedSet = new Set<string>();
+    const patch: Partial<Record<ChapterSuggestionPatchField, string>> = {};
+    const appliedByField = new Map<string, AppliedChange>();
+
+    for (const change of changes) {
+      const field = change.field;
+      if (!DOT_PATH_REGEX.test(field)) {
+        blockedSet.add(field);
+        continue;
+      }
+
+      if (chapter.confirmed_fields_json.includes(field)) {
+        blockedSet.add(field);
+        continue;
+      }
+
+      const patchField = chapterFieldMap[field];
+      if (!patchField) {
+        blockedSet.add(field);
+        continue;
+      }
+
+      const normalized = normalizeChapterPatchValue(field, change.value);
+      if (normalized === null) {
+        blockedSet.add(field);
+        continue;
+      }
+
+      patch[patchField] = normalized;
+      appliedByField.set(field, {
+        field,
+        previousValue: (chapter as Record<string, unknown>)[patchField],
+        newValue: normalized
+      });
+    }
+
+    if (Object.keys(patch).length > 0) {
+      this.updateChapter({
+        chapterId: chapter.id,
+        actor: 'ai_suggestion',
+        patch: patch as ChapterUpdateInput['patch']
+      });
+    }
+
+    const blockedFields = Array.from(blockedSet);
+    const appliedChanges = Array.from(appliedByField.values());
+    if (appliedChanges.length === 0 && blockedFields.length === 0) {
+      throw new AppError('VALIDATION_ERROR', 'No valid changes to apply');
+    }
+
+    const status: SuggestionApplyResult['status'] =
+      blockedFields.length > 0 ? 'partially_applied' : 'applied';
+    const result: SuggestionResult = {
+      appliedChanges,
+      blockedFields
+    };
+
+    this.run(`UPDATE ai_suggestions SET status = ?, result_json = ? WHERE id = ?`, [
+      status,
+      JSON.stringify(result),
+      input.suggestionId
+    ]);
+    this.persist();
+
+    return {
+      status,
+      appliedChanges,
+      blockedFields
+    };
+  }
+
+  public rejectSuggestion(input: SuggestionRejectInput): SuggestionRejectResult {
+    const suggestion = this.getSuggestionOrThrow(input.suggestionId);
+    if (suggestion.status !== 'pending' && suggestion.status !== 'rejected') {
+      throw new AppError('VALIDATION_ERROR', 'Only pending suggestion can be rejected');
+    }
+
+    if (suggestion.status !== 'rejected') {
+      this.run(`UPDATE ai_suggestions SET status = ? WHERE id = ?`, ['rejected', input.suggestionId]);
+      this.persist();
+    }
+
+    return { status: 'rejected' };
   }
 
   private async doInit(): Promise<void> {
@@ -595,12 +781,15 @@ export class AppDatabase {
         status TEXT NOT NULL,
         summary TEXT NOT NULL,
         source TEXT NOT NULL,
+        result_json TEXT NOT NULL DEFAULT '{"appliedChanges":[],"blockedFields":[]}',
         created_at TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, index_no);
       CREATE INDEX IF NOT EXISTS idx_suggestions_entity ON ai_suggestions(entity_type, entity_id, created_at);
     `);
+
+    this.ensureSuggestionColumns();
 
     const row = this.queryOne<{ value: unknown }>("SELECT value FROM app_meta WHERE key = 'schema_version'");
     if (!row) {
@@ -612,6 +801,16 @@ export class AppDatabase {
     if (current < CURRENT_SCHEMA_VERSION) {
       // Placeholder for future migrations.
       this.run("UPDATE app_meta SET value = ? WHERE key = 'schema_version'", [String(CURRENT_SCHEMA_VERSION)]);
+    }
+  }
+
+  private ensureSuggestionColumns(): void {
+    const columns = this.queryAll<{ name: unknown }>('PRAGMA table_info(ai_suggestions)');
+    const names = new Set(columns.map((item) => String(item.name)));
+    if (!names.has('result_json')) {
+      this.run(
+        `ALTER TABLE ai_suggestions ADD COLUMN result_json TEXT NOT NULL DEFAULT '{"appliedChanges":[],"blockedFields":[]}'`
+      );
     }
   }
 
@@ -629,6 +828,21 @@ export class AppDatabase {
       title: String(row.title),
       updated_at: String(row.updated_at)
     }));
+  }
+
+  private getSuggestionOrThrow(suggestionId: string): AiSuggestion {
+    const row = this.queryOne<SuggestionRow>(
+      `SELECT id, entity_type, entity_id, kind, patch_json, status, summary, source, result_json, created_at
+       FROM ai_suggestions
+       WHERE id = ?`,
+      [suggestionId]
+    );
+
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'Suggestion not found');
+    }
+
+    return mapSuggestion(row);
   }
 
   private persist(): void {

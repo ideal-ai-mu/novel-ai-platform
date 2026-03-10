@@ -226,3 +226,101 @@ I5
    - 未实现功能
    - 验证命令
    - 下一轮建议
+
+I6
+/plan
+
+现在进入第三轮正式编码。
+
+请阅读并遵守：
+@docs/architecture.md
+@docs/data-model.md
+@docs/ipc-plan.md
+@docs/mvp-sprint-1.md
+
+第三轮目标：
+优先让 AiSuggestion 真正进入“待确认更新项”工作流。
+
+本轮要求：
+
+一、Suggestion 工作流
+实现以下能力：
+1. suggestion.apply
+2. suggestion.reject
+
+其中：
+- suggestion.apply 需要根据 patch_json 中的 dot-path 变更尝试应用到目标实体
+- 如果命中 confirmed_fields_json，则不得覆盖
+- 返回结构至少包括：
+  - status
+  - appliedChanges
+  - blockedFields
+- suggestion 状态需要可更新为：
+  - pending
+  - applied
+  - rejected
+  - partially_applied（如你认为有必要）
+
+二、实体范围
+本轮只处理 Chapter 相关 suggestion。
+不要扩展到 Character / LoreEntry / Foreshadowing / TimelineEvent。
+
+三、UI 范围
+在右侧 suggestion 面板中增加：
+1. Apply 按钮
+2. Reject 按钮
+3. 展示 blockedFields / appliedChanges
+4. 展示当前 suggestion 状态
+
+四、中间编辑区
+请确认并完善 Chapter 的可编辑字段，至少包括：
+- title
+- goal
+- outline_user
+- next_hook
+- content
+
+五、约束
+- 不接真实 AI 接口
+- 不实现一致性检查
+- 不实现导入导出
+- 不做复杂 migration 系统
+- 不顺手扩展无关功能
+
+输出要求：
+1. 先输出你准备修改的文件
+2. 说明 suggestion.apply / reject 的处理方案
+3. 然后再开始编码
+4. 完成后给出：
+   - 已实现功能
+   - 未实现功能
+   - 验证命令
+   - 下一轮建议
+
+I7
+先不要继续做新功能，先修复当前运行时错误：
+
+app.init: error (Cannot read properties of undefined (reading 'app'))
+
+请只检查并修复以下链路，不要顺手扩展功能：
+- src/renderer/App.tsx
+- src/preload/preload.ts
+- src/shared/preload-api.ts
+- src/main/main.ts
+- 如有必要再看 src/main/db/database.ts
+
+修复目标：
+1. 确保 renderer 调用的 window.appApi.app.init() 与 preload 暴露结构完全一致
+2. 确保 preload 正确通过 contextBridge.exposeInMainWorld('appApi', ...) 暴露 API
+3. 确保 BrowserWindow 正确加载 preload
+4. 确保 ipcMain.handle('app.init', ...) 已注册并返回有效结果
+5. 不要改动无关业务逻辑
+6. 保持现有 SQLite / IPC / 三栏 UI 结构不变
+
+请先输出：
+1. 你判断这个错误最可能的根因
+2. 你准备检查和修改哪些文件
+3. 你预计如何验证修复成功
+
+然后再开始修改代码。
+

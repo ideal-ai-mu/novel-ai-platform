@@ -7,7 +7,9 @@ export const IPC_CHANNELS = {
   CHAPTER_GET: 'chapter.get',
   CHAPTER_UPDATE: 'chapter.update',
   SUGGESTION_LIST_BY_ENTITY: 'suggestion.listByEntity',
-  SUGGESTION_CREATE_MOCK: 'suggestion.createMock'
+  SUGGESTION_CREATE_MOCK: 'suggestion.createMock',
+  SUGGESTION_APPLY: 'suggestion.apply',
+  SUGGESTION_REJECT: 'suggestion.reject'
 } as const;
 
 export type IpcError = {
@@ -65,8 +67,19 @@ export type Chapter = {
   source: ChapterSource;
 };
 
-export type AiSuggestionStatus = 'pending' | 'accepted' | 'rejected' | 'blocked';
+export type AiSuggestionStatus = 'pending' | 'applied' | 'rejected' | 'partially_applied';
 export type AiSuggestionSource = 'mock' | 'chapter_summary' | 'manual';
+
+export type AppliedChange = {
+  field: string;
+  previousValue: unknown;
+  newValue: unknown;
+};
+
+export type SuggestionResult = {
+  appliedChanges: AppliedChange[];
+  blockedFields: string[];
+};
 
 export type AiSuggestion = {
   id: string;
@@ -77,6 +90,7 @@ export type AiSuggestion = {
   status: AiSuggestionStatus;
   summary: string;
   source: AiSuggestionSource;
+  result_json: SuggestionResult;
   created_at: string;
 };
 
@@ -128,4 +142,22 @@ export type SuggestionListByEntityInput = {
 export type SuggestionCreateMockInput = {
   entityType: string;
   entityId: string;
+};
+
+export type SuggestionApplyInput = {
+  suggestionId: string;
+};
+
+export type SuggestionApplyResult = {
+  status: AiSuggestionStatus;
+  appliedChanges: AppliedChange[];
+  blockedFields: string[];
+};
+
+export type SuggestionRejectInput = {
+  suggestionId: string;
+};
+
+export type SuggestionRejectResult = {
+  status: 'rejected';
 };

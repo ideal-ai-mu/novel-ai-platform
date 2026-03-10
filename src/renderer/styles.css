@@ -213,6 +213,24 @@ button:disabled {
   font-size: 12px;
 }
 
+.suggestion-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.suggestion-result {
+  margin-top: 4px;
+  display: grid;
+  gap: 2px;
+}
+
+.result-line {
+  font-size: 12px;
+  color: #1f2937;
+  word-break: break-word;
+}
+
 .muted {
   color: #6b7280;
   font-size: 12px;

@@ -7,7 +7,11 @@ import type {
   IpcResult,
   NovelProject,
   ProjectCreateInput,
+  SuggestionApplyInput,
+  SuggestionApplyResult,
   SuggestionCreateMockInput,
+  SuggestionRejectInput,
+  SuggestionRejectResult,
   SuggestionListByEntityInput
 } from './ipc';
 
@@ -28,5 +32,7 @@ export type AppApi = {
   suggestion: {
     listByEntity: (input: SuggestionListByEntityInput) => Promise<IpcResult<AiSuggestion[]>>;
     createMock: (input: SuggestionCreateMockInput) => Promise<IpcResult<AiSuggestion>>;
+    apply: (input: SuggestionApplyInput) => Promise<IpcResult<SuggestionApplyResult>>;
+    reject: (input: SuggestionRejectInput) => Promise<IpcResult<SuggestionRejectResult>>;
   };
 };

@@ -13,6 +13,14 @@ type InitState =
   | { phase: 'ready'; data: AppInitData }
   | { phase: 'error'; message: string };
 
+function resolveAppApi() {
+  const api = window.appApi;
+  if (!api || !api.app || typeof api.app.init !== 'function') {
+    return null;
+  }
+  return api;
+}
+
 function statusText(state: InitState): string {
   if (state.phase === 'loading') {
     return 'app.init: loading';
@@ -52,7 +60,13 @@ export function App(): JSX.Element {
   const [editorContent, setEditorContent] = useState('');
 
   const loadProjects = useCallback(async () => {
-    const result = await window.appApi.project.list();
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.project.list();
     if (!result.ok) {
       setFeedback(`加载项目失败: ${result.error.message}`);
       return;
@@ -74,7 +88,13 @@ export function App(): JSX.Element {
   }, []);
 
   const loadChapters = useCallback(async (projectId: string) => {
-    const result = await window.appApi.chapter.list(projectId);
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.chapter.list(projectId);
     if (!result.ok) {
       setFeedback(`加载章节失败: ${result.error.message}`);
       return;
@@ -95,7 +115,13 @@ export function App(): JSX.Element {
   }, []);
 
   const loadChapter = useCallback(async (chapterId: string) => {
-    const result = await window.appApi.chapter.get(chapterId);
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.chapter.get(chapterId);
     if (!result.ok) {
       setFeedback(`加载章节详情失败: ${result.error.message}`);
       return;
@@ -105,7 +131,13 @@ export function App(): JSX.Element {
   }, []);
 
   const loadSuggestions = useCallback(async (chapterId: string) => {
-    const result = await window.appApi.suggestion.listByEntity({
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.suggestion.listByEntity({
       entityType: 'Chapter',
       entityId: chapterId
     });
@@ -123,7 +155,16 @@ export function App(): JSX.Element {
 
     const init = async () => {
       try {
-        const result: IpcResult<AppInitData> = await window.appApi.app.init();
+        const api = resolveAppApi();
+        if (!api) {
+          setInitState({
+            phase: 'error',
+            message: 'Preload API 不可用：window.appApi.app.init 缺失，请通过 Electron 启动应用'
+          });
+          return;
+        }
+
+        const result: IpcResult<AppInitData> = await api.app.init();
 
         if (cancelled) {
           return;
@@ -200,7 +241,13 @@ export function App(): JSX.Element {
       return;
     }
 
-    const result = await window.appApi.project.create({
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.project.create({
       title,
       description: newProjectDesc,
       source: 'user'
@@ -224,8 +271,14 @@ export function App(): JSX.Element {
       return;
     }
 
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
     const title = newChapterTitle.trim() || `第 ${chapters.length + 1} 章`;
-    const result = await window.appApi.chapter.create({
+    const result = await api.chapter.create({
       projectId: selectedProjectId,
       title,
       status: 'draft',
@@ -249,7 +302,13 @@ export function App(): JSX.Element {
       return;
     }
 
-    const result = await window.appApi.chapter.update({
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.chapter.update({
       chapterId: currentChapter.id,
       actor: 'user',
       patch: {
@@ -281,7 +340,13 @@ export function App(): JSX.Element {
       return;
     }
 
-    const result = await window.appApi.suggestion.createMock({
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.suggestion.createMock({
       entityType: 'Chapter',
       entityId: selectedChapterId
     });
@@ -293,6 +358,57 @@ export function App(): JSX.Element {
 
     await loadSuggestions(selectedChapterId);
     setFeedback('Mock 建议已创建');
+  };
+
+  const onApplySuggestion = async (suggestionId: string) => {
+    if (!selectedChapterId) {
+      setFeedback('请先选择章节');
+      return;
+    }
+
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.suggestion.apply({ suggestionId });
+    if (!result.ok) {
+      setFeedback(`应用建议失败: ${result.error.message}`);
+      return;
+    }
+
+    await loadSuggestions(selectedChapterId);
+    await loadChapter(selectedChapterId);
+    if (selectedProjectId) {
+      await loadChapters(selectedProjectId);
+    }
+
+    setFeedback(
+      `建议已处理: ${result.data.status} | applied=${result.data.appliedChanges.length} | blocked=${result.data.blockedFields.length}`
+    );
+  };
+
+  const onRejectSuggestion = async (suggestionId: string) => {
+    if (!selectedChapterId) {
+      setFeedback('请先选择章节');
+      return;
+    }
+
+    const api = resolveAppApi();
+    if (!api) {
+      setFeedback('Preload API 不可用：window.appApi 未注入');
+      return;
+    }
+
+    const result = await api.suggestion.reject({ suggestionId });
+    if (!result.ok) {
+      setFeedback(`拒绝建议失败: ${result.error.message}`);
+      return;
+    }
+
+    await loadSuggestions(selectedChapterId);
+    setFeedback(`建议状态已更新为 ${result.data.status}`);
   };
 
   const footerText = useMemo(() => statusText(initState), [initState]);
@@ -460,6 +576,44 @@ export function App(): JSX.Element {
                 <div>status: {suggestion.status}</div>
                 <div>source: {suggestion.source}</div>
                 <div>created: {formatTime(suggestion.created_at)}</div>
+                <div className="suggestion-actions">
+                  <button
+                    onClick={() => void onApplySuggestion(suggestion.id)}
+                    disabled={suggestion.status !== 'pending'}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    onClick={() => void onRejectSuggestion(suggestion.id)}
+                    disabled={suggestion.status !== 'pending'}
+                  >
+                    Reject
+                  </button>
+                </div>
+                <div className="suggestion-result">
+                  <div>appliedChanges:</div>
+                  {suggestion.result_json.appliedChanges.length === 0 ? (
+                    <div className="muted">- none -</div>
+                  ) : (
+                    suggestion.result_json.appliedChanges.map((item, index) => (
+                      <div key={`${suggestion.id}-applied-${index}`} className="result-line">
+                        {item.field}: {String(item.previousValue ?? '')}
+                        {' -> '}
+                        {String(item.newValue ?? '')}
+                      </div>
+                    ))
+                  )}
+                  <div>blockedFields:</div>
+                  {suggestion.result_json.blockedFields.length === 0 ? (
+                    <div className="muted">- none -</div>
+                  ) : (
+                    suggestion.result_json.blockedFields.map((field) => (
+                      <div key={`${suggestion.id}-blocked-${field}`} className="result-line">
+                        {field}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             ))}
           </div>

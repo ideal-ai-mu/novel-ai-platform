@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import {
   IPC_CHANNELS,
@@ -11,6 +12,10 @@ import {
   type NovelProject,
   type ProjectCreateInput,
   type SuggestionCreateMockInput,
+  type SuggestionApplyInput,
+  type SuggestionApplyResult,
+  type SuggestionRejectInput,
+  type SuggestionRejectResult,
   type SuggestionListByEntityInput
 } from '../shared/ipc';
 import { AppError, appDatabase } from './db/database';
@@ -18,6 +23,11 @@ import { AppError, appDatabase } from './db/database';
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 function createMainWindow(): BrowserWindow {
+  const preloadPath = path.join(__dirname, '../preload/preload.js');
+  if (!fs.existsSync(preloadPath)) {
+    throw new Error(`Preload script not found: ${preloadPath}`);
+  }
+
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -26,7 +36,7 @@ function createMainWindow(): BrowserWindow {
     show: false,
     title: 'Novel AI Studio',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.js'),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -151,6 +161,24 @@ function registerIpcHandlers(): void {
       withIpcResult(async () => {
         await appDatabase.init();
         return appDatabase.createMockSuggestion(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTION_APPLY,
+    async (_event, input: SuggestionApplyInput): Promise<IpcResult<SuggestionApplyResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.applySuggestion(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTION_REJECT,
+    async (_event, input: SuggestionRejectInput): Promise<IpcResult<SuggestionRejectResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.rejectSuggestion(input);
       })
   );
 }
