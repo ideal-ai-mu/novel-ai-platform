@@ -3,16 +3,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   IPC_CHANNELS,
+  type AiExtractOutlineInput,
+  type AiExtractOutlineResult,
+  type AiGenerateChapterFieldInput,
+  type AiGenerateChapterFieldResult,
   type AppInitData,
   type AutosaveIntervalSeconds,
   type Chapter,
+  type ChapterApplyGeneratedPitsInput,
+  type ChapterAutoPickContextRefsInput,
+  type ChapterContextRefAddInput,
+  type ChapterContextRefRemoveInput,
+  type ChapterContextRefUpdateInput,
+  type ChapterContextRefView,
+  type ChapterContextRefsGetInput,
   type ChapterCreateInput,
+  type ChapterCreatePitFromSuggestionInput,
+  type ChapterCreatePitManualInput,
+  type ChapterCreatePitInput,
   type ChapterDeleteInput,
-  type ChapterGenerateOutlineAiInput,
-  type ChapterGenerateOutlineAiResult,
+  type ChapterGeneratePitsFromContentInput,
+  type ChapterGeneratePitsFromContentResult,
+  type ChapterGetPitSuggestionsInput,
+  type ChapterPitSuggestionsResult,
+  type ChapterListCreatedPitsInput,
+  type ChapterListOutlinesByProjectInput,
+  type ChapterListResolvedPitsInput,
+  type ChapterOutlineOverviewItem,
   type ChapterRefs,
   type ChapterRefsGetInput,
   type ChapterRefsUpdateInput,
+  type ChapterResolvePitInput,
+  type ChapterUnresolvePitInput,
   type ChapterUpdateInput,
   type Character,
   type CharacterCreateInput,
@@ -26,9 +48,17 @@ import {
   type LoreEntryDeleteInput,
   type LoreEntryUpdateInput,
   type NovelProject,
+  type PitCreateManualInput,
+  type PitDeleteInput,
+  type PitGroupedByProjectResult,
+  type PitListAvailableForChapterInput,
+  type PitListByProjectInput,
+  type PitListGroupedByProjectInput,
+  type PitUpdateInput,
   type ProjectCreateInput,
   type ProjectDeleteInput,
   type ProjectGetInput,
+  type StoryPitView,
   type SuggestionApplyInput,
   type SuggestionApplyResult,
   type SuggestionCreateMockInput,
@@ -36,6 +66,10 @@ import {
   type SuggestionRejectInput,
   type SuggestionRejectResult
 } from '../shared/ipc';
+import { aiService } from './ai/ai-service';
+import { contextAssembler } from './ai/context-assembler';
+import { promptBuilder } from './ai/prompt-builder';
+import type { AiTaskType, PromptPayload } from './ai/provider';
 import { AppError, appDatabase } from './db/database';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -43,6 +77,16 @@ const AUTOSAVE_OPTIONS: AutosaveIntervalSeconds[] = [0, 5, 10, 30, 60];
 
 let mainWindow: BrowserWindow | null = null;
 let autosaveIntervalSeconds: AutosaveIntervalSeconds = 10;
+
+type LoadedChapterAiResources = {
+  chapter: Chapter;
+  project: NovelProject;
+  linkedCharacters: Character[];
+  linkedLoreEntries: LoreEntry[];
+  referenceChapters: ChapterContextRefView[];
+  createdPits: StoryPitView[];
+  resolvedPits: StoryPitView[];
+};
 
 function autosaveOptionLabel(seconds: AutosaveIntervalSeconds): string {
   if (seconds === 0) {
@@ -208,6 +252,119 @@ async function withIpcResult<T>(handler: () => T | Promise<T>): Promise<IpcResul
   }
 }
 
+function hasMeaningfulAiReferenceContext(resources: LoadedChapterAiResources): boolean {
+  return Boolean(
+    resources.chapter.goal.trim() ||
+      resources.chapter.title.trim() ||
+      resources.chapter.outline_user.trim() ||
+      resources.chapter.next_hook.trim() ||
+      resources.linkedCharacters.length > 0 ||
+      resources.linkedLoreEntries.length > 0 ||
+      resources.referenceChapters.length > 0 ||
+      resources.createdPits.length > 0 ||
+      resources.resolvedPits.length > 0
+  );
+}
+
+function hasMeaningfulSummaryExtractionContext(resources: LoadedChapterAiResources): boolean {
+  return Boolean(
+    resources.chapter.content.trim() ||
+      resources.chapter.title.trim() ||
+      resources.chapter.goal.trim() ||
+      resources.chapter.next_hook.trim() ||
+      resources.linkedCharacters.length > 0 ||
+      resources.linkedLoreEntries.length > 0 ||
+      resources.referenceChapters.length > 0 ||
+      resources.createdPits.length > 0 ||
+      resources.resolvedPits.length > 0
+  );
+}
+
+function hasMeaningfulPitSuggestionContext(resources: LoadedChapterAiResources): boolean {
+  return Boolean(
+    resources.chapter.content.trim() ||
+      resources.chapter.title.trim() ||
+      resources.chapter.goal.trim() ||
+      resources.chapter.outline_user.trim() ||
+      resources.chapter.next_hook.trim() ||
+      resources.linkedCharacters.length > 0 ||
+      resources.linkedLoreEntries.length > 0 ||
+      resources.referenceChapters.length > 0
+  );
+}
+
+function normalizeAiFieldCandidate(text: string): string {
+  return text.trim().replace(/^[\s"'“”‘’《》【】]+|[\s"'“”‘’《》【】]+$/gu, '');
+}
+
+function normalizePitCandidate(text: string): string {
+  return text
+    .trim()
+    .replace(/^[-*\d.)\s]+/u, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function parsePitCandidates(text: string): string[] {
+  const lines = text
+    .split(/\r?\n+/u)
+    .map(normalizePitCandidate)
+    .filter((item) => item.length > 0);
+
+  if (lines.length > 0) {
+    return Array.from(new Set(lines)).slice(0, 6);
+  }
+
+  const single = normalizePitCandidate(text);
+  return single ? [single] : [];
+}
+
+async function loadChapterAiResources(chapterId: string): Promise<LoadedChapterAiResources> {
+  const chapter = appDatabase.getChapter(chapterId);
+  const project = appDatabase.getProject(chapter.project_id);
+  const refs = appDatabase.getChapterRefs(chapter.id);
+  const allCharacters = appDatabase.listCharacters(chapter.project_id);
+  const allLoreEntries = appDatabase.listLoreEntries(chapter.project_id);
+  const linkedCharacters = refs.characterIds
+    .map((characterId) => allCharacters.find((character) => character.id === characterId) ?? null)
+    .filter((character): character is Character => character !== null);
+  const linkedLoreEntries = refs.loreEntryIds
+    .map((loreEntryId) => allLoreEntries.find((entry) => entry.id === loreEntryId) ?? null)
+    .filter((entry): entry is LoreEntry => entry !== null);
+
+  return {
+    chapter,
+    project,
+    linkedCharacters,
+    linkedLoreEntries,
+    referenceChapters: appDatabase.getChapterContextRefs({ chapterId }),
+    createdPits: appDatabase.listChapterCreatedPits({ chapterId }),
+    resolvedPits: appDatabase.listChapterResolvedPits({ chapterId })
+  };
+}
+
+async function buildChapterPromptPayload(
+  chapterId: string,
+  taskType: AiTaskType
+): Promise<{ resources: LoadedChapterAiResources; payload: PromptPayload }> {
+  const resources = await loadChapterAiResources(chapterId);
+  const context = contextAssembler.assembleChapterContext({
+    taskType,
+    project: resources.project,
+    chapter: resources.chapter,
+    linkedCharacters: resources.linkedCharacters,
+    linkedLoreEntries: resources.linkedLoreEntries,
+    referenceChapters: resources.referenceChapters,
+    createdPits: resources.createdPits,
+    resolvedPits: resources.resolvedPits
+  });
+
+  return {
+    resources,
+    payload: promptBuilder.build(context)
+  };
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.APP_INIT, async (): Promise<IpcResult<AppInitData>> =>
     withIpcResult(async () => {
@@ -290,15 +447,6 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_GENERATE_OUTLINE_AI,
-    async (_event, input: ChapterGenerateOutlineAiInput): Promise<IpcResult<ChapterGenerateOutlineAiResult>> =>
-      withIpcResult(async () => {
-        await appDatabase.init();
-        return appDatabase.generateChapterOutlineAi(input);
-      })
-  );
-
-  ipcMain.handle(
     IPC_CHANNELS.CHAPTER_DELETE,
     async (_event, input: ChapterDeleteInput): Promise<IpcResult<DeleteResult>> =>
       withIpcResult(async () => {
@@ -322,6 +470,313 @@ function registerIpcHandlers(): void {
       withIpcResult(async () => {
         await appDatabase.init();
         return appDatabase.updateChapterRefs(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CONTEXT_REFS_GET,
+    async (_event, input: ChapterContextRefsGetInput): Promise<IpcResult<ChapterContextRefView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.getChapterContextRefs(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CONTEXT_REF_ADD,
+    async (_event, input: ChapterContextRefAddInput): Promise<IpcResult<ChapterContextRefView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.addChapterContextRef(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CONTEXT_REF_REMOVE,
+    async (_event, input: ChapterContextRefRemoveInput): Promise<IpcResult<DeleteResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.removeChapterContextRef(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CONTEXT_REF_UPDATE,
+    async (_event, input: ChapterContextRefUpdateInput): Promise<IpcResult<ChapterContextRefView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.updateChapterContextRef(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CONTEXT_REFS_AUTO_PICK,
+    async (_event, input: ChapterAutoPickContextRefsInput): Promise<IpcResult<ChapterContextRefView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.autoPickChapterContextRefs(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_LIST_OUTLINES_BY_PROJECT,
+    async (_event, input: ChapterListOutlinesByProjectInput): Promise<IpcResult<ChapterOutlineOverviewItem[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listChapterOutlinesByProject(input.projectId);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_EXTRACT_OUTLINE,
+    async (_event, input: AiExtractOutlineInput): Promise<IpcResult<AiExtractOutlineResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'summarizeChapterFromContent');
+        if (!hasMeaningfulSummaryExtractionContext(resources)) {
+          throw new AppError('VALIDATION_ERROR', '当前正文和 AI 参考内容都不足，暂时无法生成本章摘要。');
+        }
+
+        const aiResult = await aiService.summarizeChapterFromContent(payload);
+        return {
+          chapterId: resources.chapter.id,
+          candidateOutline: aiResult.text,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_GENERATE_CHAPTER_TITLE,
+    async (_event, input: AiGenerateChapterFieldInput): Promise<IpcResult<AiGenerateChapterFieldResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterTitle');
+        if (!hasMeaningfulAiReferenceContext(resources)) {
+          throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成章节标题。');
+        }
+
+        const aiResult = await aiService.generateChapterTitle(payload);
+        const candidateText = normalizeAiFieldCandidate(aiResult.text);
+        if (!candidateText) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI generated empty chapter title');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          field: 'title',
+          candidateText,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_GENERATE_CHAPTER_GOAL,
+    async (_event, input: AiGenerateChapterFieldInput): Promise<IpcResult<AiGenerateChapterFieldResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterGoal');
+        if (!hasMeaningfulAiReferenceContext(resources)) {
+          throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成本章目标。');
+        }
+
+        const aiResult = await aiService.generateChapterGoal(payload);
+        const candidateText = normalizeAiFieldCandidate(aiResult.text);
+        if (!candidateText) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI generated empty chapter goal');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          field: 'goal',
+          candidateText,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_LIST_CREATED_PITS,
+    async (_event, input: ChapterListCreatedPitsInput): Promise<IpcResult<StoryPitView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listChapterCreatedPits(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_LIST_RESOLVED_PITS,
+    async (_event, input: ChapterListResolvedPitsInput): Promise<IpcResult<StoryPitView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listChapterResolvedPits(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_GET_PIT_SUGGESTIONS,
+    async (_event, input: ChapterGetPitSuggestionsInput): Promise<IpcResult<ChapterPitSuggestionsResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterPitsFromContent');
+        if (!hasMeaningfulPitSuggestionContext(resources)) {
+          throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成新增坑候选。');
+        }
+
+        const aiResult = await aiService.generateChapterPitsFromContent(payload);
+        const candidates = parsePitCandidates(aiResult.text);
+        if (candidates.length === 0) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI generated empty pit candidates');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          candidates,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CREATE_PIT_FROM_SUGGESTION,
+    async (_event, input: ChapterCreatePitFromSuggestionInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.createChapterPitFromSuggestion(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CREATE_PIT_MANUAL,
+    async (_event, input: ChapterCreatePitManualInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.createChapterPitManual(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CREATE_PIT,
+    async (_event, input: ChapterCreatePitInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.createChapterPit(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_GENERATE_PITS_FROM_CONTENT,
+    async (_event, input: ChapterGeneratePitsFromContentInput): Promise<IpcResult<ChapterGeneratePitsFromContentResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterPitsFromContent');
+        if (!hasMeaningfulPitSuggestionContext(resources)) {
+          throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成新增坑候选。');
+        }
+
+        const aiResult = await aiService.generateChapterPitsFromContent(payload);
+        const candidates = parsePitCandidates(aiResult.text);
+        if (candidates.length === 0) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI generated empty pit candidates');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          candidates,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_APPLY_GENERATED_PITS,
+    async (_event, input: ChapterApplyGeneratedPitsInput): Promise<IpcResult<StoryPitView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.applyGeneratedPits(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_RESOLVE_PIT,
+    async (_event, input: ChapterResolvePitInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.resolvePit(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_UNRESOLVE_PIT,
+    async (_event, input: ChapterUnresolvePitInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.unresolvePit(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIT_LIST_BY_PROJECT,
+    async (_event, input: PitListByProjectInput): Promise<IpcResult<StoryPitView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listPitsByProject(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIT_LIST_GROUPED_BY_PROJECT,
+    async (_event, input: PitListGroupedByProjectInput): Promise<IpcResult<PitGroupedByProjectResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listPitsGroupedByProject(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIT_LIST_AVAILABLE_FOR_CHAPTER,
+    async (_event, input: PitListAvailableForChapterInput): Promise<IpcResult<StoryPitView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listAvailablePitsForChapter(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIT_CREATE_MANUAL,
+    async (_event, input: PitCreateManualInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.createManualPit(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIT_UPDATE,
+    async (_event, input: PitUpdateInput): Promise<IpcResult<StoryPitView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.updatePit(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIT_DELETE,
+    async (_event, input: PitDeleteInput): Promise<IpcResult<DeleteResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.deletePit(input);
       })
   );
 

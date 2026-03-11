@@ -5,14 +5,32 @@ import initSqlJs from 'sql.js';
 import { app } from 'electron';
 import type {
   AppliedChange,
+  AiGenerateChapterField,
   AiSuggestion,
   AppInitData,
+  ChapterApplyGeneratedPitsInput,
+  ChapterAutoPickContextRefsInput,
+  ChapterContextRef,
+  ChapterContextRefAddInput,
+  ChapterContextRefRemoveInput,
+  ChapterContextRefUpdateInput,
+  ChapterContextRefView,
+  ChapterContextRefsGetInput,
+  ChapterCreatePitFromSuggestionInput,
+  ChapterCreatePitManualInput,
+  ChapterCreatePitInput,
+  ChapterGetPitSuggestionsInput,
+  ChapterOutlineOverviewItem,
   ChapterRefs,
   Chapter,
   ChapterRefsUpdateInput,
   ChapterCreateInput,
-  ChapterGenerateOutlineAiInput,
-  ChapterGenerateOutlineAiResult,
+  ChapterGeneratePitsFromContentInput,
+  ChapterGeneratePitsFromContentResult,
+  ChapterListCreatedPitsInput,
+  ChapterListResolvedPitsInput,
+  ChapterResolvePitInput,
+  ChapterUnresolvePitInput,
   Character,
   CharacterCreateInput,
   CharacterUpdateInput,
@@ -23,7 +41,19 @@ import type {
   LoreEntryUpdateInput,
   ChapterUpdateInput,
   NovelProject,
+  PitCreateManualInput,
+  PitDeleteInput,
+  PitGroupedByProjectResult,
+  PitListAvailableForChapterInput,
+  PitListByProjectInput,
+  PitListGroupedByProjectInput,
+  PitUpdateInput,
   ProjectCreateInput,
+  StoryPit,
+  StoryPitCreationMethod,
+  StoryPitStatus,
+  StoryPitType,
+  StoryPitView,
   SuggestionApplyInput,
   SuggestionApplyResult,
   SuggestionCreateMockInput,
@@ -33,7 +63,7 @@ import type {
   SuggestionListByEntityInput
 } from '../../shared/ipc';
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 const DOT_PATH_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$/;
 
 type SqlJsStatement = {
@@ -61,6 +91,7 @@ type ChapterRow = Record<
   | 'index_no'
   | 'title'
   | 'status'
+  | 'pits_enabled'
   | 'goal'
   | 'outline_ai'
   | 'outline_user'
@@ -93,6 +124,41 @@ type CharacterRow = Record<
 >;
 type LoreEntryRow = Record<
   'id' | 'project_id' | 'type' | 'title' | 'summary' | 'content' | 'tags_json' | 'source' | 'created_at' | 'updated_at',
+  unknown
+>;
+type ChapterContextRefRow = Record<
+  | 'id'
+  | 'chapter_id'
+  | 'ref_chapter_id'
+  | 'mode'
+  | 'weight'
+  | 'note'
+  | 'created_at'
+  | 'updated_at'
+  | 'ref_chapter_index_no'
+  | 'ref_chapter_title'
+  | 'ref_outline_user'
+  | 'ref_updated_at'
+  | 'ref_content',
+  unknown
+>;
+type StoryPitRow = Record<
+  | 'id'
+  | 'project_id'
+  | 'type'
+  | 'origin_chapter_id'
+  | 'creation_method'
+  | 'content'
+  | 'status'
+  | 'resolved_in_chapter_id'
+  | 'sort_order'
+  | 'note'
+  | 'created_at'
+  | 'updated_at'
+  | 'origin_chapter_index_no'
+  | 'origin_chapter_title'
+  | 'resolved_in_chapter_index_no'
+  | 'resolved_in_chapter_title',
   unknown
 >;
 
@@ -190,6 +256,7 @@ function mapChapter(row: ChapterRow): Chapter {
     index_no: Number(row.index_no),
     title: String(row.title),
     status: row.status as Chapter['status'],
+    pits_enabled: Boolean(Number(row.pits_enabled ?? 0)),
     goal: String(row.goal ?? ''),
     outline_ai: String(row.outline_ai ?? ''),
     outline_user: String(row.outline_user ?? ''),
@@ -231,6 +298,93 @@ function mapLoreEntry(row: LoreEntryRow): LoreEntry {
     source: row.source as LoreEntry['source'],
     created_at: String(row.created_at),
     updated_at: String(row.updated_at)
+  };
+}
+
+function ensureChapterContextRefMode(mode: unknown): ChapterContextRef['mode'] {
+  if (mode === 'auto' || mode === 'manual' || mode === 'pinned') {
+    return mode;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid chapter context ref mode');
+}
+
+function ensureStoryPitType(type: unknown): StoryPitType {
+  if (type === 'chapter' || type === 'manual') {
+    return type;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid story pit type');
+}
+
+function ensureStoryPitCreationMethod(method: unknown): StoryPitCreationMethod {
+  if (method === 'ai' || method === 'manual') {
+    return method;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid story pit creation method');
+}
+
+function ensureStoryPitStatus(status: unknown): StoryPitStatus {
+  if (status === 'open' || status === 'resolved') {
+    return status;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid story pit status');
+}
+
+function buildContentExcerpt(content: string, maxLength = 120): string {
+  const normalized = content.replace(/\s+/gu, ' ').trim();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength).trim()}...`;
+}
+
+function mapChapterContextRef(row: ChapterContextRefRow): ChapterContextRefView {
+  return {
+    id: String(row.id),
+    chapter_id: String(row.chapter_id),
+    ref_chapter_id: String(row.ref_chapter_id),
+    mode: ensureChapterContextRefMode(row.mode),
+    weight: Number(row.weight ?? 0),
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    ref_chapter_index_no: Number(row.ref_chapter_index_no),
+    ref_chapter_title: String(row.ref_chapter_title ?? ''),
+    ref_outline_user: String(row.ref_outline_user ?? ''),
+    ref_updated_at: String(row.ref_updated_at ?? ''),
+    ref_content_excerpt: buildContentExcerpt(String(row.ref_content ?? ''))
+  };
+}
+
+function mapStoryPit(row: StoryPitRow): StoryPitView {
+  return {
+    id: String(row.id),
+    project_id: String(row.project_id),
+    type: ensureStoryPitType(row.type),
+    origin_chapter_id: row.origin_chapter_id === null || row.origin_chapter_id === undefined ? null : String(row.origin_chapter_id),
+    creation_method: ensureStoryPitCreationMethod(row.creation_method),
+    content: String(row.content ?? ''),
+    status: ensureStoryPitStatus(row.status),
+    resolved_in_chapter_id:
+      row.resolved_in_chapter_id === null || row.resolved_in_chapter_id === undefined ? null : String(row.resolved_in_chapter_id),
+    sort_order: row.sort_order === null || row.sort_order === undefined ? null : Number(row.sort_order),
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    origin_chapter_index_no:
+      row.origin_chapter_index_no === null || row.origin_chapter_index_no === undefined ? null : Number(row.origin_chapter_index_no),
+    origin_chapter_title:
+      row.origin_chapter_title === null || row.origin_chapter_title === undefined ? null : String(row.origin_chapter_title),
+    resolved_in_chapter_index_no:
+      row.resolved_in_chapter_index_no === null || row.resolved_in_chapter_index_no === undefined
+        ? null
+        : Number(row.resolved_in_chapter_index_no),
+    resolved_in_chapter_title:
+      row.resolved_in_chapter_title === null || row.resolved_in_chapter_title === undefined
+        ? null
+        : String(row.resolved_in_chapter_title)
   };
 }
 
@@ -540,7 +694,7 @@ export class AppDatabase {
 
   public listChapters(projectId: string): Chapter[] {
     const rows = this.queryAll<ChapterRow>(
-      `SELECT id, project_id, index_no, title, status, goal, outline_ai, outline_user,
+      `SELECT id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user,
               content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
        FROM chapters
        WHERE project_id = ?
@@ -578,6 +732,7 @@ export class AppDatabase {
       index_no: input.indexNo ?? maxIndex + 1,
       title,
       status: input.status ?? 'draft',
+      pits_enabled: Boolean(input.pitsEnabled ?? false),
       goal: input.goal ?? '',
       outline_ai: input.outlineAi ?? '',
       outline_user: input.outlineUser ?? '',
@@ -593,15 +748,16 @@ export class AppDatabase {
 
     this.run(
       `INSERT INTO chapters (
-         id, project_id, index_no, title, status, goal, outline_ai, outline_user, content, next_hook,
+         id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user, content, next_hook,
          word_count, revision, confirmed_fields_json, created_at, updated_at, source
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         chapter.id,
         chapter.project_id,
         chapter.index_no,
         chapter.title,
         chapter.status,
+        chapter.pits_enabled ? 1 : 0,
         chapter.goal,
         chapter.outline_ai,
         chapter.outline_user,
@@ -626,7 +782,7 @@ export class AppDatabase {
 
   public updateChapter(input: ChapterUpdateInput): Chapter {
     const row = this.queryOne<ChapterRow>(
-      `SELECT id, project_id, index_no, title, status, goal, outline_ai, outline_user,
+      `SELECT id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user,
               content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
        FROM chapters
        WHERE id = ?`,
@@ -678,6 +834,9 @@ export class AppDatabase {
     if (typeof patch.status === 'string') {
       assign('status', patch.status);
     }
+    if (typeof patch.pits_enabled === 'boolean') {
+      assign('pits_enabled', patch.pits_enabled ? 1 : 0);
+    }
     if (typeof patch.goal === 'string') {
       assign('goal', patch.goal);
     }
@@ -719,6 +878,12 @@ export class AppDatabase {
   public deleteChapter(chapterId: string): DeleteResult {
     this.getChapterOrThrow(chapterId);
     this.deleteChapterSuggestions([chapterId]);
+    this.run(
+      `UPDATE story_pits
+       SET status = 'open', resolved_in_chapter_id = NULL, updated_at = ?
+       WHERE resolved_in_chapter_id = ?`,
+      [nowIso(), chapterId]
+    );
     this.run('DELETE FROM chapters WHERE id = ?', [chapterId]);
     this.persist();
     return { deleted: true };
@@ -787,6 +952,397 @@ export class AppDatabase {
 
     this.persist();
     return this.getChapterRefs(chapter.id);
+  }
+
+  public getChapterContextRefs(input: ChapterContextRefsGetInput): ChapterContextRefView[] {
+    this.getChapterOrThrow(input.chapterId);
+    return this.listChapterContextRefs(input.chapterId);
+  }
+
+  public addChapterContextRef(input: ChapterContextRefAddInput): ChapterContextRefView[] {
+    const currentChapter = this.getChapterOrThrow(input.chapterId);
+    const refChapter = this.getChapterOrThrow(input.refChapterId);
+    const mode = ensureChapterContextRefMode(input.mode ?? 'manual');
+    if (mode === 'auto') {
+      throw new AppError('VALIDATION_ERROR', 'Use autoPickContextRefs for auto mode');
+    }
+
+    this.validateContextRefTarget(currentChapter, refChapter);
+
+    const timestamp = nowIso();
+    const note = typeof input.note === 'string' ? input.note.trim() : null;
+    const weight = typeof input.weight === 'number' && Number.isFinite(input.weight) ? input.weight : this.defaultContextRefWeight(mode);
+    const existing = this.queryOne<{ id: unknown }>(
+      'SELECT id FROM chapter_context_refs WHERE chapter_id = ? AND ref_chapter_id = ?',
+      [currentChapter.id, refChapter.id]
+    );
+
+    if (existing) {
+      this.run(
+        `UPDATE chapter_context_refs
+         SET mode = ?, weight = ?, note = ?, updated_at = ?
+         WHERE id = ?`,
+        [mode, weight, note, timestamp, String(existing.id)]
+      );
+      this.persist();
+      return this.listChapterContextRefs(currentChapter.id);
+    }
+
+    this.run(
+      `INSERT INTO chapter_context_refs (
+         id, chapter_id, ref_chapter_id, mode, weight, note, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [randomUUID(), currentChapter.id, refChapter.id, mode, weight, note, timestamp, timestamp]
+    );
+    this.persist();
+    return this.listChapterContextRefs(currentChapter.id);
+  }
+
+  public updateChapterContextRef(input: ChapterContextRefUpdateInput): ChapterContextRefView[] {
+    const current = this.getChapterContextRefOrThrow(input.contextRefId);
+    const patch = input.patch ?? {};
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    const assign = (column: string, value: unknown) => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (patch.mode !== undefined) {
+      assign('mode', ensureChapterContextRefMode(patch.mode));
+    }
+    if (patch.weight !== undefined) {
+      if (typeof patch.weight !== 'number' || !Number.isFinite(patch.weight)) {
+        throw new AppError('VALIDATION_ERROR', 'weight must be a finite number');
+      }
+      assign('weight', patch.weight);
+    }
+    if (patch.note !== undefined) {
+      if (patch.note !== null && typeof patch.note !== 'string') {
+        throw new AppError('VALIDATION_ERROR', 'note must be a string or null');
+      }
+      assign('note', patch.note === null ? null : patch.note.trim());
+    }
+
+    if (sets.length === 0) {
+      return this.listChapterContextRefs(current.chapter_id);
+    }
+
+    assign('updated_at', nowIso());
+    values.push(current.id);
+    this.run(`UPDATE chapter_context_refs SET ${sets.join(', ')} WHERE id = ?`, values);
+    this.persist();
+    return this.listChapterContextRefs(current.chapter_id);
+  }
+
+  public removeChapterContextRef(input: ChapterContextRefRemoveInput): DeleteResult {
+    const current = this.getChapterContextRefOrThrow(input.contextRefId);
+    this.run('DELETE FROM chapter_context_refs WHERE id = ?', [current.id]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public autoPickChapterContextRefs(input: ChapterAutoPickContextRefsInput): ChapterContextRefView[] {
+    const currentChapter = this.getChapterOrThrow(input.chapterId);
+    const limit = this.normalizeAutoPickLimit(input.limit);
+    const existing = this.listChapterContextRefs(currentChapter.id);
+    const protectedIds = new Set(
+      existing.filter((item) => item.mode === 'manual' || item.mode === 'pinned').map((item) => item.ref_chapter_id)
+    );
+
+    const candidates = this.listChapters(currentChapter.project_id)
+      .filter((chapter) => chapter.index_no < currentChapter.index_no && !protectedIds.has(chapter.id))
+      .sort((left, right) => right.index_no - left.index_no)
+      .slice(0, limit);
+
+    this.run('BEGIN');
+    try {
+      this.run(`DELETE FROM chapter_context_refs WHERE chapter_id = ? AND mode = 'auto'`, [currentChapter.id]);
+
+      for (const [index, chapter] of candidates.entries()) {
+        const timestamp = nowIso();
+        this.run(
+          `INSERT INTO chapter_context_refs (
+             id, chapter_id, ref_chapter_id, mode, weight, note, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            randomUUID(),
+            currentChapter.id,
+            chapter.id,
+            'auto',
+            this.defaultContextRefWeight('auto') - index,
+            null,
+            timestamp,
+            timestamp
+          ]
+        );
+      }
+
+      this.run('COMMIT');
+    } catch (error) {
+      this.run('ROLLBACK');
+      throw error;
+    }
+
+    this.persist();
+    return this.listChapterContextRefs(currentChapter.id);
+  }
+
+  public listChapterOutlinesByProject(projectId: string): ChapterOutlineOverviewItem[] {
+    this.getProject(projectId);
+    return this.listChapters(projectId).map((chapter) => ({
+      chapterId: chapter.id,
+      index_no: chapter.index_no,
+      title: chapter.title,
+      outline_user: chapter.outline_user,
+      updated_at: chapter.updated_at
+    }));
+  }
+
+  public listPitsByProject(input: PitListByProjectInput): StoryPitView[] {
+    this.getProject(input.projectId);
+    return this.listStoryPits(
+      `p.project_id = ?`,
+      [input.projectId]
+    );
+  }
+
+  public listPitsGroupedByProject(input: PitListGroupedByProjectInput): PitGroupedByProjectResult {
+    const pits = this.listPitsByProject({ projectId: input.projectId });
+    const chapterGroupsMap = new Map<
+      string,
+      {
+        chapterId: string;
+        index_no: number;
+        title: string;
+        pits: StoryPitView[];
+      }
+    >();
+    const manualPits: StoryPitView[] = [];
+
+    for (const pit of pits) {
+      if (pit.type === 'manual' || pit.origin_chapter_id === null || pit.origin_chapter_index_no === null || !pit.origin_chapter_title) {
+        manualPits.push(pit);
+        continue;
+      }
+
+      const group = chapterGroupsMap.get(pit.origin_chapter_id) ?? {
+        chapterId: pit.origin_chapter_id,
+        index_no: pit.origin_chapter_index_no,
+        title: pit.origin_chapter_title,
+        pits: []
+      };
+      group.pits.push(pit);
+      chapterGroupsMap.set(pit.origin_chapter_id, group);
+    }
+
+    return {
+      chapterGroups: Array.from(chapterGroupsMap.values()).sort((left, right) => left.index_no - right.index_no),
+      manualPits
+    };
+  }
+
+  public listAvailablePitsForChapter(input: PitListAvailableForChapterInput): StoryPitView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    return this.listStoryPits(
+      `p.project_id = ?
+       AND p.status = 'open'
+       AND (
+         p.type = 'manual'
+         OR (
+           p.type = 'chapter'
+           AND p.origin_chapter_id IS NOT NULL
+           AND oc.index_no < ?
+         )
+       )`,
+      [chapter.project_id, chapter.index_no]
+    );
+  }
+
+  public createManualPit(input: PitCreateManualInput): StoryPitView {
+    this.getProject(input.projectId);
+    const content = (input.content ?? '').trim();
+    if (!content) {
+      throw new AppError('VALIDATION_ERROR', 'Pit content is required');
+    }
+
+    return this.insertStoryPit({
+      projectId: input.projectId,
+      type: 'manual',
+      originChapterId: null,
+      creationMethod: 'manual',
+      content,
+      note: input.note ?? null
+    });
+  }
+
+  public updatePit(input: PitUpdateInput): StoryPitView {
+    const current = this.getStoryPitOrThrow(input.pitId);
+    const patch = input.patch ?? {};
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    const assign = (column: string, value: unknown) => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (typeof patch.content === 'string') {
+      const content = patch.content.trim();
+      if (!content) {
+        throw new AppError('VALIDATION_ERROR', 'Pit content cannot be empty');
+      }
+      assign('content', content);
+    }
+    if (patch.note !== undefined) {
+      if (patch.note !== null && typeof patch.note !== 'string') {
+        throw new AppError('VALIDATION_ERROR', 'note must be a string or null');
+      }
+      assign('note', patch.note === null ? null : patch.note.trim());
+    }
+    if (patch.sort_order !== undefined) {
+      if (patch.sort_order !== null && (!Number.isFinite(patch.sort_order) || !Number.isInteger(patch.sort_order))) {
+        throw new AppError('VALIDATION_ERROR', 'sort_order must be an integer or null');
+      }
+      assign('sort_order', patch.sort_order);
+    }
+
+    if (sets.length === 0) {
+      return this.getStoryPitViewOrThrow(current.id);
+    }
+
+    assign('updated_at', nowIso());
+    values.push(current.id);
+    this.run(`UPDATE story_pits SET ${sets.join(', ')} WHERE id = ?`, values);
+    this.persist();
+    return this.getStoryPitViewOrThrow(current.id);
+  }
+
+  public deletePit(input: PitDeleteInput): DeleteResult {
+    this.getStoryPitOrThrow(input.pitId);
+    this.run('DELETE FROM story_pits WHERE id = ?', [input.pitId]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public listChapterCreatedPits(input: ChapterListCreatedPitsInput): StoryPitView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    return this.listStoryPits('p.origin_chapter_id = ?', [chapter.id]);
+  }
+
+  public listChapterResolvedPits(input: ChapterListResolvedPitsInput): StoryPitView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    return this.listStoryPits('p.resolved_in_chapter_id = ?', [chapter.id]);
+  }
+
+  public createChapterPit(input: ChapterCreatePitInput): StoryPitView {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+
+    const content = (input.content ?? '').trim();
+    if (!content) {
+      throw new AppError('VALIDATION_ERROR', 'Pit content is required');
+    }
+
+    return this.insertStoryPit({
+      projectId: chapter.project_id,
+      type: 'chapter',
+      originChapterId: chapter.id,
+      creationMethod: 'manual',
+      content,
+      note: input.note ?? null
+    });
+  }
+
+  public createChapterPitManual(input: ChapterCreatePitManualInput): StoryPitView {
+    return this.createChapterPit({
+      chapterId: input.chapterId,
+      content: input.content,
+      note: input.note ?? null
+    });
+  }
+
+  public createChapterPitFromSuggestion(input: ChapterCreatePitFromSuggestionInput): StoryPitView {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const content = (input.content ?? '').trim();
+    if (!content) {
+      throw new AppError('VALIDATION_ERROR', 'Pit content is required');
+    }
+
+    return this.insertStoryPit({
+      projectId: chapter.project_id,
+      type: 'chapter',
+      originChapterId: chapter.id,
+      creationMethod: 'ai',
+      content,
+      note: input.note ?? null
+    });
+  }
+
+  public applyGeneratedPits(input: ChapterApplyGeneratedPitsInput): StoryPitView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const candidates = Array.from(
+      new Set(
+        ensureStringArray(input.candidates, 'candidates')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0)
+      )
+    );
+    if (candidates.length === 0) {
+      throw new AppError('VALIDATION_ERROR', 'At least one pit candidate is required');
+    }
+
+    this.run('BEGIN');
+    try {
+      for (const content of candidates) {
+        const timestamp = nowIso();
+        this.run(
+          `INSERT INTO story_pits (
+             id, project_id, type, origin_chapter_id, creation_method, content, status,
+             resolved_in_chapter_id, sort_order, note, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), chapter.project_id, 'chapter', chapter.id, 'ai', content, 'open', null, null, null, timestamp, timestamp]
+        );
+      }
+      this.run('COMMIT');
+    } catch (error) {
+      this.run('ROLLBACK');
+      throw error;
+    }
+
+    this.persist();
+    return this.listChapterCreatedPits({ chapterId: chapter.id });
+  }
+
+  public resolvePit(input: ChapterResolvePitInput): StoryPitView {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const pit = this.getStoryPitOrThrow(input.pitId);
+    this.validatePitResolvableForChapter(chapter, pit);
+    this.run(
+      `UPDATE story_pits
+       SET status = 'resolved', resolved_in_chapter_id = ?, updated_at = ?
+       WHERE id = ?`,
+      [chapter.id, nowIso(), pit.id]
+    );
+    this.persist();
+    return this.getStoryPitViewOrThrow(pit.id);
+  }
+
+  public unresolvePit(input: ChapterUnresolvePitInput): StoryPitView {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const pit = this.getStoryPitOrThrow(input.pitId);
+    if (pit.resolved_in_chapter_id !== chapter.id) {
+      throw new AppError('VALIDATION_ERROR', 'Pit is not resolved in the current chapter');
+    }
+
+    this.run(
+      `UPDATE story_pits
+       SET status = 'open', resolved_in_chapter_id = NULL, updated_at = ?
+       WHERE id = ?`,
+      [nowIso(), pit.id]
+    );
+    this.persist();
+    return this.getStoryPitViewOrThrow(pit.id);
   }
 
   public listCharacters(projectId: string): Character[] {
@@ -989,24 +1545,6 @@ export class AppDatabase {
     return { deleted: true };
   }
 
-  public generateChapterOutlineAi(input: ChapterGenerateOutlineAiInput): ChapterGenerateOutlineAiResult {
-    const chapter = this.getChapterOrThrow(input.chapterId);
-    const linkedCharacters = this.listChapterCharacters(chapter.id);
-    const linkedLoreEntries = this.listChapterLoreEntries(chapter.id);
-    const outlineAi = buildOutlineAiText(chapter, linkedCharacters, linkedLoreEntries);
-    const updatedChapter = this.updateChapter({
-      chapterId: chapter.id,
-      patch: {
-        outline_ai: outlineAi
-      }
-    });
-
-    return {
-      chapter: updatedChapter,
-      suggestion: null
-    };
-  }
-
   public listSuggestionsByEntity(input: SuggestionListByEntityInput): AiSuggestion[] {
     if (input.entityType !== 'Chapter') {
       throw new AppError('VALIDATION_ERROR', 'Only Chapter suggestion is supported in this sprint');
@@ -1197,7 +1735,7 @@ export class AppDatabase {
 
   private getChapterOrThrow(chapterId: string): Chapter {
     const row = this.queryOne<ChapterRow>(
-      `SELECT id, project_id, index_no, title, status, goal, outline_ai, outline_user,
+      `SELECT id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user,
               content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
        FROM chapters
        WHERE id = ?`,
@@ -1239,6 +1777,131 @@ export class AppDatabase {
     }
 
     return mapLoreEntry(row);
+  }
+
+  private getChapterContextRefOrThrow(contextRefId: string): ChapterContextRef {
+    const row = this.queryOne<Record<'id' | 'chapter_id' | 'ref_chapter_id' | 'mode' | 'weight' | 'note' | 'created_at' | 'updated_at', unknown>>(
+      `SELECT id, chapter_id, ref_chapter_id, mode, weight, note, created_at, updated_at
+       FROM chapter_context_refs
+       WHERE id = ?`,
+      [contextRefId]
+    );
+
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'Chapter context ref not found');
+    }
+
+    return {
+      id: String(row.id),
+      chapter_id: String(row.chapter_id),
+      ref_chapter_id: String(row.ref_chapter_id),
+      mode: ensureChapterContextRefMode(row.mode),
+      weight: Number(row.weight ?? 0),
+      note: row.note === null || row.note === undefined ? null : String(row.note),
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at)
+    };
+  }
+
+  private listChapterContextRefs(chapterId: string): ChapterContextRefView[] {
+    const rows = this.queryAll<ChapterContextRefRow>(
+      `SELECT refs.id,
+              refs.chapter_id,
+              refs.ref_chapter_id,
+              refs.mode,
+              refs.weight,
+              refs.note,
+              refs.created_at,
+              refs.updated_at,
+              ref_chapter.index_no AS ref_chapter_index_no,
+              ref_chapter.title AS ref_chapter_title,
+              ref_chapter.outline_user AS ref_outline_user,
+              ref_chapter.updated_at AS ref_updated_at,
+              ref_chapter.content AS ref_content
+       FROM chapter_context_refs refs
+       INNER JOIN chapters ref_chapter ON ref_chapter.id = refs.ref_chapter_id
+       WHERE refs.chapter_id = ?
+       ORDER BY
+         CASE refs.mode
+           WHEN 'pinned' THEN 0
+           WHEN 'manual' THEN 1
+           ELSE 2
+         END,
+         refs.weight DESC,
+         ref_chapter.index_no DESC,
+         refs.created_at ASC`,
+      [chapterId]
+    );
+
+    return rows.map(mapChapterContextRef);
+  }
+
+  private listStoryPits(whereClause: string, params: unknown[]): StoryPitView[] {
+    const rows = this.queryAll<StoryPitRow>(
+      `SELECT
+         p.id,
+         p.project_id,
+         p.type,
+         p.origin_chapter_id,
+         p.creation_method,
+         p.content,
+         p.status,
+         p.resolved_in_chapter_id,
+         p.sort_order,
+         p.note,
+         p.created_at,
+         p.updated_at,
+         oc.index_no AS origin_chapter_index_no,
+         oc.title AS origin_chapter_title,
+         rc.index_no AS resolved_in_chapter_index_no,
+         rc.title AS resolved_in_chapter_title
+       FROM story_pits p
+       LEFT JOIN chapters oc ON oc.id = p.origin_chapter_id
+       LEFT JOIN chapters rc ON rc.id = p.resolved_in_chapter_id
+       WHERE ${whereClause}
+       ORDER BY
+         CASE p.status WHEN 'open' THEN 0 ELSE 1 END,
+         CASE WHEN oc.index_no IS NULL THEN 999999 ELSE oc.index_no END ASC,
+         p.created_at ASC,
+         p.updated_at DESC`,
+      params
+    );
+
+    return rows.map(mapStoryPit);
+  }
+
+  private insertStoryPit(input: {
+    projectId: string;
+    type: StoryPitType;
+    originChapterId: string | null;
+    creationMethod: StoryPitCreationMethod;
+    content: string;
+    note?: string | null;
+  }): StoryPitView {
+    const timestamp = nowIso();
+    const pitId = randomUUID();
+    this.run(
+      `INSERT INTO story_pits (
+         id, project_id, type, origin_chapter_id, creation_method, content, status,
+         resolved_in_chapter_id, sort_order, note, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        pitId,
+        input.projectId,
+        input.type,
+        input.originChapterId,
+        input.creationMethod,
+        input.content,
+        'open',
+        null,
+        null,
+        input.note ?? null,
+        timestamp,
+        timestamp
+      ]
+    );
+    this.persist();
+    return this.getStoryPitViewOrThrow(pitId);
   }
 
   private listChapterCharacters(chapterId: string): Character[] {
@@ -1289,6 +1952,102 @@ export class AppDatabase {
     }
   }
 
+  private validateContextRefTarget(currentChapter: Chapter, refChapter: Chapter): void {
+    if (currentChapter.id === refChapter.id) {
+      throw new AppError('VALIDATION_ERROR', 'Cannot reference current chapter itself');
+    }
+    if (currentChapter.project_id !== refChapter.project_id) {
+      throw new AppError('VALIDATION_ERROR', 'Context ref chapter must belong to the same project');
+    }
+    if (refChapter.index_no >= currentChapter.index_no) {
+      throw new AppError('VALIDATION_ERROR', 'Context ref chapter must be a previous chapter');
+    }
+  }
+
+  private normalizeAutoPickLimit(input: number | undefined): number {
+    if (input === undefined) {
+      return 3;
+    }
+    if (!Number.isFinite(input)) {
+      throw new AppError('VALIDATION_ERROR', 'limit must be a finite number');
+    }
+    return Math.min(Math.max(Math.trunc(input), 2), 4);
+  }
+
+  private defaultContextRefWeight(mode: ChapterContextRef['mode']): number {
+    switch (mode) {
+      case 'pinned':
+        return 300;
+      case 'manual':
+        return 200;
+      case 'auto':
+        return 100;
+      default:
+        return 0;
+    }
+  }
+
+  private ensurePitsEnabled(chapter: Chapter): void {
+    if (!chapter.pits_enabled) {
+      throw new AppError('VALIDATION_ERROR', '当前章节未开启埋坑，暂时不能编辑或生成本章坑位');
+    }
+  }
+
+  private getStoryPitOrThrow(pitId: string): StoryPitView {
+    const row = this.queryOne<StoryPitRow>(
+      `SELECT
+         p.id,
+         p.project_id,
+         p.type,
+         p.origin_chapter_id,
+         p.creation_method,
+         p.content,
+         p.status,
+         p.resolved_in_chapter_id,
+         p.sort_order,
+         p.note,
+         p.created_at,
+         p.updated_at,
+         oc.index_no AS origin_chapter_index_no,
+         oc.title AS origin_chapter_title,
+         rc.index_no AS resolved_in_chapter_index_no,
+         rc.title AS resolved_in_chapter_title
+       FROM story_pits p
+       LEFT JOIN chapters oc ON oc.id = p.origin_chapter_id
+       LEFT JOIN chapters rc ON rc.id = p.resolved_in_chapter_id
+       WHERE p.id = ?`,
+      [pitId]
+    );
+
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'Story pit not found');
+    }
+
+    return mapStoryPit(row);
+  }
+
+  private getStoryPitViewOrThrow(pitId: string): StoryPitView {
+    return this.getStoryPitOrThrow(pitId);
+  }
+
+  private validatePitResolvableForChapter(chapter: Chapter, pit: StoryPitView): void {
+    if (pit.project_id !== chapter.project_id) {
+      throw new AppError('VALIDATION_ERROR', 'Pit must belong to the same project');
+    }
+    if (pit.status === 'resolved' && pit.resolved_in_chapter_id !== chapter.id) {
+      throw new AppError('VALIDATION_ERROR', 'Pit is already resolved in another chapter');
+    }
+    if (pit.type === 'chapter') {
+      if (!pit.origin_chapter_id) {
+        throw new AppError('VALIDATION_ERROR', 'Chapter pit must have an origin chapter');
+      }
+      const originChapter = this.getChapterOrThrow(pit.origin_chapter_id);
+      if (originChapter.index_no >= chapter.index_no) {
+        throw new AppError('VALIDATION_ERROR', 'Cannot resolve a pit from the current or future chapter');
+      }
+    }
+  }
+
   private deleteChapterSuggestions(chapterIds: string[]): void {
     if (chapterIds.length === 0) {
       return;
@@ -1319,6 +2078,7 @@ export class AppDatabase {
         index_no INTEGER NOT NULL,
         title TEXT NOT NULL,
         status TEXT NOT NULL,
+        pits_enabled INTEGER NOT NULL DEFAULT 0,
         goal TEXT NOT NULL DEFAULT '',
         outline_ai TEXT NOT NULL DEFAULT '',
         outline_user TEXT NOT NULL DEFAULT '',
@@ -1378,6 +2138,19 @@ export class AppDatabase {
         FOREIGN KEY(lore_entry_id) REFERENCES lore_entries(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS chapter_context_refs (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT NOT NULL,
+        ref_chapter_id TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 0,
+        note TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(ref_chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS ai_suggestions (
         id TEXT PRIMARY KEY,
         entity_type TEXT NOT NULL,
@@ -1391,14 +2164,38 @@ export class AppDatabase {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS story_pits (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        origin_chapter_id TEXT DEFAULT NULL,
+        creation_method TEXT NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL,
+        resolved_in_chapter_id TEXT DEFAULT NULL,
+        sort_order INTEGER DEFAULT NULL,
+        note TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES novel_projects(id) ON DELETE CASCADE,
+        FOREIGN KEY(origin_chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(resolved_in_chapter_id) REFERENCES chapters(id) ON DELETE SET NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, index_no);
       CREATE INDEX IF NOT EXISTS idx_characters_project ON characters(project_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_lore_project ON lore_entries(project_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_chapter_character_links_chapter ON chapter_character_links(chapter_id);
       CREATE INDEX IF NOT EXISTS idx_chapter_lore_links_chapter ON chapter_lore_links(chapter_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_context_refs_chapter ON chapter_context_refs(chapter_id, mode, weight);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_chapter_context_refs_pair ON chapter_context_refs(chapter_id, ref_chapter_id);
       CREATE INDEX IF NOT EXISTS idx_suggestions_entity ON ai_suggestions(entity_type, entity_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_story_pits_project ON story_pits(project_id, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_story_pits_origin ON story_pits(origin_chapter_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_story_pits_resolved ON story_pits(resolved_in_chapter_id, updated_at);
     `);
 
+    this.ensureChapterColumns();
     this.ensureSuggestionColumns();
 
     const row = this.queryOne<{ value: unknown }>("SELECT value FROM app_meta WHERE key = 'schema_version'");
@@ -1421,6 +2218,14 @@ export class AppDatabase {
       this.run(
         `ALTER TABLE ai_suggestions ADD COLUMN result_json TEXT NOT NULL DEFAULT '{"appliedChanges":[],"blockedFields":[]}'`
       );
+    }
+  }
+
+  private ensureChapterColumns(): void {
+    const columns = this.queryAll<{ name: unknown }>('PRAGMA table_info(chapters)');
+    const names = new Set(columns.map((item) => String(item.name)));
+    if (!names.has('pits_enabled')) {
+      this.run(`ALTER TABLE chapters ADD COLUMN pits_enabled INTEGER NOT NULL DEFAULT 0`);
     }
   }
 

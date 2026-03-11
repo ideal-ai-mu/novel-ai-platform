@@ -9,10 +9,34 @@ export const IPC_CHANNELS = {
   CHAPTER_CREATE: 'chapter.create',
   CHAPTER_GET: 'chapter.get',
   CHAPTER_UPDATE: 'chapter.update',
-  CHAPTER_GENERATE_OUTLINE_AI: 'chapter.generateOutlineAi',
   CHAPTER_DELETE: 'chapter.delete',
   CHAPTER_REFS_GET: 'chapter.refs.get',
   CHAPTER_REFS_UPDATE: 'chapter.refs.update',
+  CHAPTER_CONTEXT_REFS_GET: 'chapter.getContextRefs',
+  CHAPTER_CONTEXT_REF_ADD: 'chapter.addContextRef',
+  CHAPTER_CONTEXT_REF_REMOVE: 'chapter.removeContextRef',
+  CHAPTER_CONTEXT_REF_UPDATE: 'chapter.updateContextRef',
+  CHAPTER_CONTEXT_REFS_AUTO_PICK: 'chapter.autoPickContextRefs',
+  CHAPTER_LIST_OUTLINES_BY_PROJECT: 'chapter.listOutlinesByProject',
+  AI_EXTRACT_OUTLINE: 'ai.extractOutline',
+  AI_GENERATE_CHAPTER_TITLE: 'ai.generateChapterTitle',
+  AI_GENERATE_CHAPTER_GOAL: 'ai.generateChapterGoal',
+  CHAPTER_LIST_CREATED_PITS: 'chapter.listCreatedPits',
+  CHAPTER_LIST_RESOLVED_PITS: 'chapter.listResolvedPits',
+  CHAPTER_GET_PIT_SUGGESTIONS: 'chapter.getPitSuggestions',
+  CHAPTER_CREATE_PIT_FROM_SUGGESTION: 'chapter.createPitFromSuggestion',
+  CHAPTER_CREATE_PIT_MANUAL: 'chapter.createPitManual',
+  CHAPTER_CREATE_PIT: 'chapter.createPit',
+  CHAPTER_GENERATE_PITS_FROM_CONTENT: 'chapter.generatePitsFromContent',
+  CHAPTER_APPLY_GENERATED_PITS: 'chapter.applyGeneratedPits',
+  CHAPTER_RESOLVE_PIT: 'chapter.resolvePit',
+  CHAPTER_UNRESOLVE_PIT: 'chapter.unresolvePit',
+  PIT_LIST_BY_PROJECT: 'pit.listByProject',
+  PIT_LIST_GROUPED_BY_PROJECT: 'pit.listGroupedByProject',
+  PIT_LIST_AVAILABLE_FOR_CHAPTER: 'pit.listAvailableForChapter',
+  PIT_CREATE_MANUAL: 'pit.createManual',
+  PIT_UPDATE: 'pit.update',
+  PIT_DELETE: 'pit.delete',
   CHARACTER_LIST: 'character.list',
   CHARACTER_CREATE: 'character.create',
   CHARACTER_GET: 'character.get',
@@ -75,6 +99,7 @@ export type Chapter = {
   index_no: number;
   title: string;
   status: ChapterStatus;
+  pits_enabled: boolean;
   goal: string;
   outline_ai: string;
   outline_user: string;
@@ -92,6 +117,73 @@ export type ChapterRefs = {
   chapterId: string;
   characterIds: string[];
   loreEntryIds: string[];
+};
+
+export type ChapterContextRefMode = 'auto' | 'manual' | 'pinned';
+
+export type ChapterContextRef = {
+  id: string;
+  chapter_id: string;
+  ref_chapter_id: string;
+  mode: ChapterContextRefMode;
+  weight: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChapterContextRefView = ChapterContextRef & {
+  ref_chapter_index_no: number;
+  ref_chapter_title: string;
+  ref_outline_user: string;
+  ref_updated_at: string;
+  ref_content_excerpt: string;
+};
+
+export type ChapterOutlineOverviewItem = {
+  chapterId: string;
+  index_no: number;
+  title: string;
+  outline_user: string;
+  updated_at: string;
+};
+
+export type StoryPitType = 'chapter' | 'manual';
+export type StoryPitCreationMethod = 'ai' | 'manual';
+export type StoryPitStatus = 'open' | 'resolved';
+
+export type StoryPit = {
+  id: string;
+  project_id: string;
+  type: StoryPitType;
+  origin_chapter_id: string | null;
+  creation_method: StoryPitCreationMethod;
+  content: string;
+  status: StoryPitStatus;
+  resolved_in_chapter_id: string | null;
+  sort_order: number | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StoryPitView = StoryPit & {
+  origin_chapter_index_no: number | null;
+  origin_chapter_title: string | null;
+  resolved_in_chapter_index_no: number | null;
+  resolved_in_chapter_title: string | null;
+};
+
+export type StoryPitChapterGroup = {
+  chapterId: string;
+  index_no: number;
+  title: string;
+  pits: StoryPitView[];
+};
+
+export type PitGroupedByProjectResult = {
+  chapterGroups: StoryPitChapterGroup[];
+  manualPits: StoryPitView[];
 };
 
 export type Character = {
@@ -146,9 +238,39 @@ export type AiSuggestion = {
   created_at: string;
 };
 
-export type ChapterGenerateOutlineAiResult = {
-  chapter: Chapter;
-  suggestion: AiSuggestion | null;
+export type AiExtractOutlineResult = {
+  chapterId: string;
+  candidateOutline: string;
+  provider: string;
+  model: string | null;
+  referenceText: string;
+};
+
+export type AiGenerateChapterField = 'title' | 'goal';
+
+export type AiGenerateChapterFieldResult = {
+  chapterId: string;
+  field: AiGenerateChapterField;
+  candidateText: string;
+  provider: string;
+  model: string | null;
+  referenceText: string;
+};
+
+export type ChapterGeneratePitsFromContentResult = {
+  chapterId: string;
+  candidates: string[];
+  provider: string;
+  model: string | null;
+  referenceText: string;
+};
+
+export type ChapterPitSuggestionsResult = {
+  chapterId: string;
+  candidates: string[];
+  provider: string;
+  model: string | null;
+  referenceText: string;
 };
 
 export type ProjectCreateInput = {
@@ -170,6 +292,7 @@ export type ChapterCreateInput = {
   title: string;
   indexNo?: number;
   status?: ChapterStatus;
+  pitsEnabled?: boolean;
   goal?: string;
   outlineAi?: string;
   outlineUser?: string;
@@ -183,6 +306,7 @@ export type ChapterUpdatePatch = Partial<
     Chapter,
     | 'title'
     | 'status'
+    | 'pits_enabled'
     | 'goal'
     | 'outline_ai'
     | 'outline_user'
@@ -203,7 +327,11 @@ export type ChapterDeleteInput = {
   chapterId: string;
 };
 
-export type ChapterGenerateOutlineAiInput = {
+export type AiExtractOutlineInput = {
+  chapterId: string;
+};
+
+export type AiGenerateChapterFieldInput = {
   chapterId: string;
 };
 
@@ -215,6 +343,114 @@ export type ChapterRefsUpdateInput = {
   chapterId: string;
   characterIds: string[];
   loreEntryIds: string[];
+};
+
+export type ChapterContextRefsGetInput = {
+  chapterId: string;
+};
+
+export type ChapterContextRefAddInput = {
+  chapterId: string;
+  refChapterId: string;
+  mode?: Exclude<ChapterContextRefMode, 'auto'>;
+  weight?: number;
+  note?: string | null;
+};
+
+export type ChapterContextRefRemoveInput = {
+  contextRefId: string;
+};
+
+export type ChapterContextRefUpdateInput = {
+  contextRefId: string;
+  patch: Partial<Pick<ChapterContextRef, 'mode' | 'weight' | 'note'>>;
+};
+
+export type ChapterAutoPickContextRefsInput = {
+  chapterId: string;
+  limit?: number;
+};
+
+export type ChapterListOutlinesByProjectInput = {
+  projectId: string;
+};
+
+export type PitListByProjectInput = {
+  projectId: string;
+};
+
+export type PitListGroupedByProjectInput = {
+  projectId: string;
+};
+
+export type PitListAvailableForChapterInput = {
+  chapterId: string;
+};
+
+export type PitCreateManualInput = {
+  projectId: string;
+  content: string;
+  note?: string | null;
+};
+
+export type PitUpdatePatch = Partial<Pick<StoryPit, 'content' | 'note' | 'sort_order'>>;
+
+export type PitUpdateInput = {
+  pitId: string;
+  patch: PitUpdatePatch;
+};
+
+export type PitDeleteInput = {
+  pitId: string;
+};
+
+export type ChapterListCreatedPitsInput = {
+  chapterId: string;
+};
+
+export type ChapterListResolvedPitsInput = {
+  chapterId: string;
+};
+
+export type ChapterGetPitSuggestionsInput = {
+  chapterId: string;
+};
+
+export type ChapterCreatePitFromSuggestionInput = {
+  chapterId: string;
+  content: string;
+  note?: string | null;
+};
+
+export type ChapterCreatePitManualInput = {
+  chapterId: string;
+  content: string;
+  note?: string | null;
+};
+
+export type ChapterCreatePitInput = {
+  chapterId: string;
+  content: string;
+  note?: string | null;
+};
+
+export type ChapterGeneratePitsFromContentInput = {
+  chapterId: string;
+};
+
+export type ChapterApplyGeneratedPitsInput = {
+  chapterId: string;
+  candidates: string[];
+};
+
+export type ChapterResolvePitInput = {
+  chapterId: string;
+  pitId: string;
+};
+
+export type ChapterUnresolvePitInput = {
+  chapterId: string;
+  pitId: string;
 };
 
 export type CharacterCreateInput = {
