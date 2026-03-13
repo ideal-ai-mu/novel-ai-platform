@@ -15,7 +15,19 @@ export class RealAiProvider implements AiProvider {
     throw new Error('Real AI provider is not configured in the current sprint');
   }
 
+  public async generateChapterNextHook(_payload: PromptPayload): Promise<AiTextResult> {
+    throw new Error('Real AI provider is not configured in the current sprint');
+  }
+
   public async generateChapterPitsFromContent(_payload: PromptPayload): Promise<AiTextResult> {
+    throw new Error('Real AI provider is not configured in the current sprint');
+  }
+
+  public async reviewChapterPitResponses(_payload: PromptPayload): Promise<AiTextResult> {
+    throw new Error('Real AI provider is not configured in the current sprint');
+  }
+
+  public async reviewChapterPitCandidates(_payload: PromptPayload): Promise<AiTextResult> {
     throw new Error('Real AI provider is not configured in the current sprint');
   }
 

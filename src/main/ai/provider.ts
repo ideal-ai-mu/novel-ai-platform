@@ -1,8 +1,11 @@
-﻿import type {
+import type {
   Character,
   Chapter,
   ChapterContextRefMode,
   ChapterContextRefView,
+  ChapterPitCandidate,
+  ChapterPitPlanView,
+  ChapterPitReviewView,
   LoreEntry,
   NovelProject,
   StoryPitView
@@ -12,7 +15,10 @@ export type AiTaskType =
   | 'summarizeChapterFromContent'
   | 'generateChapterTitle'
   | 'generateChapterGoal'
+  | 'generateChapterNextHook'
   | 'generateChapterPitsFromContent'
+  | 'reviewChapterPitResponses'
+  | 'reviewChapterPitCandidates'
   | 'proposeOutlineUpdate'
   | 'generateChapterSuggestions';
 
@@ -29,6 +35,8 @@ export type ChapterAiContext = {
     title: string;
     goal: string;
     outlineUser: string;
+    planningClues: string[];
+    foreshadowNotes: string[];
     nextHook: string;
     content: string;
   };
@@ -54,14 +62,25 @@ export type ChapterAiContext = {
     outlineUser: string;
     updatedAt: string;
   }>;
-  createdPits: Array<{
+  plannedPits: Array<{
     id: string;
-    content: string;
-  }>;
-  resolvedPits: Array<{
-    id: string;
+    pitId: string;
     content: string;
     originLabel: string;
+    progressStatus: StoryPitView['progress_status'];
+  }>;
+  pitReviews: Array<{
+    id: string;
+    pitId: string;
+    content: string;
+    originLabel: string;
+    outcome: ChapterPitReviewView['outcome'];
+    note: string;
+  }>;
+  pitCandidates: Array<{
+    id: string;
+    content: string;
+    status: ChapterPitCandidate['status'];
   }>;
 };
 
@@ -72,8 +91,9 @@ export type BuildChapterAiContextInput = {
   linkedCharacters: Character[];
   linkedLoreEntries: LoreEntry[];
   referenceChapters: ChapterContextRefView[];
-  createdPits: StoryPitView[];
-  resolvedPits: StoryPitView[];
+  plannedPits: ChapterPitPlanView[];
+  pitReviews: ChapterPitReviewView[];
+  pitCandidates: ChapterPitCandidate[];
 };
 
 export type PromptSection = {
@@ -88,6 +108,7 @@ export type PromptPayload = {
   sections: PromptSection[];
   systemPrompt: string;
   userPrompt: string;
+  transientInstruction?: string;
   context: ChapterAiContext;
 };
 
@@ -102,7 +123,11 @@ export interface AiProvider {
   summarizeChapterFromContent(payload: PromptPayload): Promise<AiTextResult>;
   generateChapterTitle(payload: PromptPayload): Promise<AiTextResult>;
   generateChapterGoal(payload: PromptPayload): Promise<AiTextResult>;
+  generateChapterNextHook(payload: PromptPayload): Promise<AiTextResult>;
   generateChapterPitsFromContent(payload: PromptPayload): Promise<AiTextResult>;
+  reviewChapterPitResponses(payload: PromptPayload): Promise<AiTextResult>;
+  reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult>;
   proposeOutlineUpdate(payload: PromptPayload): Promise<AiTextResult>;
   generateChapterSuggestions(payload: PromptPayload): Promise<AiTextResult>;
 }
+

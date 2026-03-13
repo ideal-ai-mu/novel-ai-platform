@@ -7,11 +7,16 @@ import {
   type AiExtractOutlineResult,
   type AiGenerateChapterFieldInput,
   type AiGenerateChapterFieldResult,
+  type AiReviewChapterPitCandidatesInput,
+  type AiReviewChapterPitCandidatesResult,
+  type AiReviewChapterPitResponsesInput,
+  type AiReviewChapterPitResponsesResult,
   type AppInitData,
   type AutosaveIntervalSeconds,
   type Chapter,
   type ChapterApplyGeneratedPitsInput,
   type ChapterAutoPickContextRefsInput,
+  type ChapterClearPitReviewInput,
   type ChapterContextRefAddInput,
   type ChapterContextRefRemoveInput,
   type ChapterContextRefUpdateInput,
@@ -19,13 +24,24 @@ import {
   type ChapterContextRefsGetInput,
   type ChapterCreateInput,
   type ChapterCreatePitFromSuggestionInput,
+  type ChapterCreatePitCandidateManualInput,
   type ChapterCreatePitManualInput,
   type ChapterCreatePitInput,
   type ChapterDeleteInput,
+  type ChapterDeletePitCandidateInput,
   type ChapterGeneratePitsFromContentInput,
   type ChapterGeneratePitsFromContentResult,
   type ChapterGetPitSuggestionsInput,
+  type ChapterListPitCandidatesInput,
+  type ChapterListPitReviewsInput,
+  type ChapterListPlannedPitsInput,
   type ChapterPitSuggestionsResult,
+  type ChapterPitCandidate,
+  type ChapterPitCandidateStatus,
+  type ChapterPitPlanView,
+  type ChapterPitReviewOutcome,
+  type ChapterPitReviewView,
+  type ChapterPlanPitResponseInput,
   type ChapterListCreatedPitsInput,
   type ChapterListOutlinesByProjectInput,
   type ChapterListResolvedPitsInput,
@@ -33,8 +49,12 @@ import {
   type ChapterRefs,
   type ChapterRefsGetInput,
   type ChapterRefsUpdateInput,
+  type ChapterReviewPitCandidateInput,
+  type ChapterReviewPitResponseInput,
   type ChapterResolvePitInput,
+  type ChapterUnplanPitResponseInput,
   type ChapterUnresolvePitInput,
+  type ChapterUpdatePitCandidateInput,
   type ChapterUpdateInput,
   type Character,
   type CharacterCreateInput,
@@ -84,8 +104,9 @@ type LoadedChapterAiResources = {
   linkedCharacters: Character[];
   linkedLoreEntries: LoreEntry[];
   referenceChapters: ChapterContextRefView[];
-  createdPits: StoryPitView[];
-  resolvedPits: StoryPitView[];
+  plannedPits: ChapterPitPlanView[];
+  pitReviews: ChapterPitReviewView[];
+  pitCandidates: ChapterPitCandidate[];
 };
 
 function autosaveOptionLabel(seconds: AutosaveIntervalSeconds): string {
@@ -258,26 +279,18 @@ function hasMeaningfulAiReferenceContext(resources: LoadedChapterAiResources): b
       resources.chapter.title.trim() ||
       resources.chapter.outline_user.trim() ||
       resources.chapter.next_hook.trim() ||
+      resources.chapter.foreshadow_notes_json.length > 0 ||
       resources.linkedCharacters.length > 0 ||
       resources.linkedLoreEntries.length > 0 ||
       resources.referenceChapters.length > 0 ||
-      resources.createdPits.length > 0 ||
-      resources.resolvedPits.length > 0
+      resources.plannedPits.length > 0 ||
+      resources.pitCandidates.length > 0 ||
+      resources.pitReviews.length > 0
   );
 }
 
 function hasMeaningfulSummaryExtractionContext(resources: LoadedChapterAiResources): boolean {
-  return Boolean(
-    resources.chapter.content.trim() ||
-      resources.chapter.title.trim() ||
-      resources.chapter.goal.trim() ||
-      resources.chapter.next_hook.trim() ||
-      resources.linkedCharacters.length > 0 ||
-      resources.linkedLoreEntries.length > 0 ||
-      resources.referenceChapters.length > 0 ||
-      resources.createdPits.length > 0 ||
-      resources.resolvedPits.length > 0
-  );
+  return Boolean(resources.chapter.content.trim());
 }
 
 function hasMeaningfulPitSuggestionContext(resources: LoadedChapterAiResources): boolean {
@@ -285,11 +298,12 @@ function hasMeaningfulPitSuggestionContext(resources: LoadedChapterAiResources):
     resources.chapter.content.trim() ||
       resources.chapter.title.trim() ||
       resources.chapter.goal.trim() ||
-      resources.chapter.outline_user.trim() ||
       resources.chapter.next_hook.trim() ||
+      resources.chapter.foreshadow_notes_json.length > 0 ||
       resources.linkedCharacters.length > 0 ||
       resources.linkedLoreEntries.length > 0 ||
-      resources.referenceChapters.length > 0
+      resources.referenceChapters.length > 0 ||
+      resources.plannedPits.length > 0
   );
 }
 
@@ -319,6 +333,86 @@ function parsePitCandidates(text: string): string[] {
   return single ? [single] : [];
 }
 
+function parseJsonRecord(text: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('AI returned non-object JSON');
+    }
+    return value as Record<string, unknown>;
+  } catch (error) {
+    throw new AppError('AI_OUTPUT_INVALID', error instanceof Error ? error.message : 'AI returned invalid JSON');
+  }
+}
+
+function ensurePitReviewOutcomeValue(value: unknown): ChapterPitReviewOutcome {
+  return value === 'none' || value === 'partial' || value === 'clear' || value === 'resolved' ? value : 'none';
+}
+
+function ensurePitCandidateStatusValue(value: unknown): ChapterPitCandidateStatus {
+  return value === 'draft' || value === 'weak' || value === 'confirmed' || value === 'discarded' ? value : 'draft';
+}
+
+function parseAiPitResponseReviewItems(text: string, plannedPits: ChapterPitPlanView[]): AiReviewChapterPitResponsesResult['items'] {
+  const json = parseJsonRecord(text);
+  const rawItems = Array.isArray(json.items) ? json.items : [];
+  const plannedByPitId = new Map(plannedPits.map((plan) => [plan.pit.id, plan]));
+
+  const items = rawItems
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => {
+      const pitId = typeof item.pitId === 'string' ? item.pitId : '';
+      if (!plannedByPitId.has(pitId)) {
+        return null;
+      }
+      return {
+        pitId,
+        outcome: ensurePitReviewOutcomeValue(item.outcome),
+        note: typeof item.note === 'string' ? item.note.trim() : ''
+      };
+    })
+    .filter((item): item is AiReviewChapterPitResponsesResult['items'][number] => item !== null);
+
+  return Array.from(new Map(items.map((item) => [item.pitId, item])).values());
+}
+
+function parseAiPitCandidateReviewItems(
+  text: string,
+  pitCandidates: ChapterPitCandidate[]
+): Pick<AiReviewChapterPitCandidatesResult, 'existingItems' | 'newItems'> {
+  const json = parseJsonRecord(text);
+  const rawExistingItems = Array.isArray(json.existingItems) ? json.existingItems : [];
+  const rawNewItems = Array.isArray(json.newItems) ? json.newItems : [];
+  const candidateById = new Map(pitCandidates.map((candidate) => [candidate.id, candidate]));
+
+  const existingItems = rawExistingItems
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => {
+      const candidateId = typeof item.candidateId === 'string' ? item.candidateId : '';
+      if (!candidateById.has(candidateId)) {
+        return null;
+      }
+      return {
+        candidateId,
+        status: ensurePitCandidateStatusValue(item.status)
+      };
+    })
+    .filter((item): item is AiReviewChapterPitCandidatesResult['existingItems'][number] => item !== null);
+
+  const newItems = rawNewItems
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      content: typeof item.content === 'string' ? normalizePitCandidate(item.content) : '',
+      status: ensurePitCandidateStatusValue(item.status)
+    }))
+    .filter((item) => item.content.length > 0);
+
+  return {
+    existingItems: Array.from(new Map(existingItems.map((item) => [item.candidateId, item])).values()),
+    newItems: Array.from(new Map(newItems.map((item) => [item.content, item])).values())
+  };
+}
+
 async function loadChapterAiResources(chapterId: string): Promise<LoadedChapterAiResources> {
   const chapter = appDatabase.getChapter(chapterId);
   const project = appDatabase.getProject(chapter.project_id);
@@ -338,14 +432,16 @@ async function loadChapterAiResources(chapterId: string): Promise<LoadedChapterA
     linkedCharacters,
     linkedLoreEntries,
     referenceChapters: appDatabase.getChapterContextRefs({ chapterId }),
-    createdPits: appDatabase.listChapterCreatedPits({ chapterId }),
-    resolvedPits: appDatabase.listChapterResolvedPits({ chapterId })
+    plannedPits: appDatabase.listChapterPlannedPits({ chapterId }),
+    pitReviews: appDatabase.listChapterPitReviews({ chapterId }),
+    pitCandidates: appDatabase.listChapterPitCandidates({ chapterId })
   };
 }
 
 async function buildChapterPromptPayload(
   chapterId: string,
-  taskType: AiTaskType
+  taskType: AiTaskType,
+  options: { promptText?: string } = {}
 ): Promise<{ resources: LoadedChapterAiResources; payload: PromptPayload }> {
   const resources = await loadChapterAiResources(chapterId);
   const context = contextAssembler.assembleChapterContext({
@@ -355,14 +451,43 @@ async function buildChapterPromptPayload(
     linkedCharacters: resources.linkedCharacters,
     linkedLoreEntries: resources.linkedLoreEntries,
     referenceChapters: resources.referenceChapters,
-    createdPits: resources.createdPits,
-    resolvedPits: resources.resolvedPits
+    plannedPits: resources.plannedPits,
+    pitReviews: resources.pitReviews,
+    pitCandidates: resources.pitCandidates
   });
 
   return {
     resources,
-    payload: promptBuilder.build(context)
+    payload: promptBuilder.build(context, { transientInstruction: options.promptText })
   };
+}
+
+async function ensureChapterHasInitialOutline(chapter: Chapter): Promise<Chapter> {
+  if (chapter.outline_user.trim() || !chapter.content.trim()) {
+    return chapter;
+  }
+
+  try {
+    const { resources, payload } = await buildChapterPromptPayload(chapter.id, 'summarizeChapterFromContent');
+    if (!hasMeaningfulSummaryExtractionContext(resources)) {
+      return chapter;
+    }
+
+    const aiResult = await aiService.summarizeChapterFromContent(payload);
+    const candidateOutline = aiResult.text.trim();
+    if (!candidateOutline) {
+      return chapter;
+    }
+
+    return appDatabase.updateChapter({
+      chapterId: chapter.id,
+      patch: {
+        outline_user: candidateOutline
+      }
+    });
+  } catch {
+    return chapter;
+  }
 }
 
 function registerIpcHandlers(): void {
@@ -424,7 +549,8 @@ function registerIpcHandlers(): void {
     async (_event, input: ChapterCreateInput): Promise<IpcResult<Chapter>> =>
       withIpcResult(async () => {
         await appDatabase.init();
-        return appDatabase.createChapter(input);
+        const chapter = appDatabase.createChapter(input);
+        return ensureChapterHasInitialOutline(chapter);
       })
   );
 
@@ -532,9 +658,11 @@ function registerIpcHandlers(): void {
     async (_event, input: AiExtractOutlineInput): Promise<IpcResult<AiExtractOutlineResult>> =>
       withIpcResult(async () => {
         await appDatabase.init();
-        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'summarizeChapterFromContent');
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'summarizeChapterFromContent', {
+          promptText: input.promptText
+        });
         if (!hasMeaningfulSummaryExtractionContext(resources)) {
-          throw new AppError('VALIDATION_ERROR', '当前正文和 AI 参考内容都不足，暂时无法生成本章摘要。');
+          throw new AppError('VALIDATION_ERROR', '当前正文为空，暂时无法提取章节摘要。');
         }
 
         const aiResult = await aiService.summarizeChapterFromContent(payload);
@@ -553,7 +681,9 @@ function registerIpcHandlers(): void {
     async (_event, input: AiGenerateChapterFieldInput): Promise<IpcResult<AiGenerateChapterFieldResult>> =>
       withIpcResult(async () => {
         await appDatabase.init();
-        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterTitle');
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterTitle', {
+          promptText: input.promptText
+        });
         if (!hasMeaningfulAiReferenceContext(resources)) {
           throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成章节标题。');
         }
@@ -580,7 +710,9 @@ function registerIpcHandlers(): void {
     async (_event, input: AiGenerateChapterFieldInput): Promise<IpcResult<AiGenerateChapterFieldResult>> =>
       withIpcResult(async () => {
         await appDatabase.init();
-        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterGoal');
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterGoal', {
+          promptText: input.promptText
+        });
         if (!hasMeaningfulAiReferenceContext(resources)) {
           throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成本章目标。');
         }
@@ -603,11 +735,199 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.AI_GENERATE_CHAPTER_NEXT_HOOK,
+    async (_event, input: AiGenerateChapterFieldInput): Promise<IpcResult<AiGenerateChapterFieldResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterNextHook', {
+          promptText: input.promptText
+        });
+        if (!hasMeaningfulAiReferenceContext(resources) && !resources.chapter.content.trim()) {
+          throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成章末钩子。');
+        }
+
+        const aiResult = await aiService.generateChapterNextHook(payload);
+        const candidateText = normalizeAiFieldCandidate(aiResult.text);
+        if (!candidateText) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI generated empty next hook');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          field: 'next_hook',
+          candidateText,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_REVIEW_CHAPTER_PIT_RESPONSES,
+    async (_event, input: AiReviewChapterPitResponsesInput): Promise<IpcResult<AiReviewChapterPitResponsesResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'reviewChapterPitResponses', {
+          promptText: input.promptText
+        });
+        if (!resources.chapter.content.trim()) {
+          throw new AppError('VALIDATION_ERROR', '当前正文为空，暂时无法 AI 总结填坑结果。');
+        }
+        if (resources.plannedPits.length === 0) {
+          throw new AppError('VALIDATION_ERROR', '当前没有计划回应坑，暂时无法生成填坑总结。');
+        }
+
+        const aiResult = await aiService.reviewChapterPitResponses(payload);
+        const items = parseAiPitResponseReviewItems(aiResult.text, resources.plannedPits);
+        if (items.length === 0) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI 没有返回有效的填坑总结候选');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          items,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: payload.referenceText
+        };
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_REVIEW_CHAPTER_PIT_CANDIDATES,
+    async (_event, input: AiReviewChapterPitCandidatesInput): Promise<IpcResult<AiReviewChapterPitCandidatesResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'reviewChapterPitCandidates', {
+          promptText: input.promptText
+        });
+        if (!resources.chapter.content.trim()) {
+          throw new AppError('VALIDATION_ERROR', '当前正文为空，暂时无法 AI 分析埋坑确认。');
+        }
+
+        const aiResult = await aiService.reviewChapterPitCandidates(payload);
+        const parsed = parseAiPitCandidateReviewItems(aiResult.text, resources.pitCandidates);
+        if (parsed.existingItems.length === 0 && parsed.newItems.length === 0) {
+          throw new AppError('AI_OUTPUT_INVALID', 'AI 没有返回有效的埋坑确认候选');
+        }
+
+        return {
+          chapterId: resources.chapter.id,
+          existingItems: parsed.existingItems,
+          newItems: parsed.newItems,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          referenceText: resources.chapter.content.trim()
+        };
+      })
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.CHAPTER_LIST_CREATED_PITS,
     async (_event, input: ChapterListCreatedPitsInput): Promise<IpcResult<StoryPitView[]>> =>
       withIpcResult(async () => {
         await appDatabase.init();
         return appDatabase.listChapterCreatedPits(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_LIST_PLANNED_PITS,
+    async (_event, input: ChapterListPlannedPitsInput): Promise<IpcResult<ChapterPitPlanView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listChapterPlannedPits(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_PLAN_PIT_RESPONSE,
+    async (_event, input: ChapterPlanPitResponseInput): Promise<IpcResult<ChapterPitPlanView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.planPitResponse(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_UNPLAN_PIT_RESPONSE,
+    async (_event, input: ChapterUnplanPitResponseInput): Promise<IpcResult<DeleteResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.unplanPitResponse(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_LIST_PIT_REVIEWS,
+    async (_event, input: ChapterListPitReviewsInput): Promise<IpcResult<ChapterPitReviewView[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listChapterPitReviews(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_REVIEW_PIT_RESPONSE,
+    async (_event, input: ChapterReviewPitResponseInput): Promise<IpcResult<ChapterPitReviewView>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.reviewPitResponse(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CLEAR_PIT_REVIEW,
+    async (_event, input: ChapterClearPitReviewInput): Promise<IpcResult<DeleteResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.clearPitReview(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_LIST_PIT_CANDIDATES,
+    async (_event, input: ChapterListPitCandidatesInput): Promise<IpcResult<ChapterPitCandidate[]>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.listChapterPitCandidates(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_CREATE_PIT_CANDIDATE_MANUAL,
+    async (_event, input: ChapterCreatePitCandidateManualInput): Promise<IpcResult<ChapterPitCandidate>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.createPitCandidateManual(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_UPDATE_PIT_CANDIDATE,
+    async (_event, input: ChapterUpdatePitCandidateInput): Promise<IpcResult<ChapterPitCandidate>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.updatePitCandidate(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_DELETE_PIT_CANDIDATE,
+    async (_event, input: ChapterDeletePitCandidateInput): Promise<IpcResult<DeleteResult>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.deletePitCandidate(input);
+      })
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAPTER_REVIEW_PIT_CANDIDATE,
+    async (_event, input: ChapterReviewPitCandidateInput): Promise<IpcResult<ChapterPitCandidate>> =>
+      withIpcResult(async () => {
+        await appDatabase.init();
+        return appDatabase.reviewPitCandidate(input);
       })
   );
 
@@ -625,7 +945,9 @@ function registerIpcHandlers(): void {
     async (_event, input: ChapterGetPitSuggestionsInput): Promise<IpcResult<ChapterPitSuggestionsResult>> =>
       withIpcResult(async () => {
         await appDatabase.init();
-        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterPitsFromContent');
+        const { resources, payload } = await buildChapterPromptPayload(input.chapterId, 'generateChapterPitsFromContent', {
+          promptText: input.promptText
+        });
         if (!hasMeaningfulPitSuggestionContext(resources)) {
           throw new AppError('VALIDATION_ERROR', '当前上下文不足，暂时无法生成新增坑候选。');
         }

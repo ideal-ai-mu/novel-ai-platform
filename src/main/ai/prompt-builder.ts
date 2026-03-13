@@ -1,302 +1,228 @@
-﻿import type { ChapterAiContext, PromptPayload, PromptSection } from './provider';
+import type { AiTaskType, ChapterAiContext, PromptPayload, PromptSection } from './provider';
 
-function taskLabel(taskType: ChapterAiContext['taskType']): string {
-  switch (taskType) {
-    case 'summarizeChapterFromContent':
-      return '根据当前正文更新章节摘要';
-    case 'generateChapterTitle':
-      return '基于 AI 参考上下文生成章节标题';
-    case 'generateChapterGoal':
-      return '基于 AI 参考上下文生成本章目标';
-    case 'generateChapterPitsFromContent':
-      return '根据当前章节内容生成新增坑候选';
-    case 'proposeOutlineUpdate':
-      return '提出章节梗概更新建议';
-    case 'generateChapterSuggestions':
-      return '生成章节 AI 建议';
-    default:
-      return taskType;
+type BuildPromptOptions = {
+  transientInstruction?: string;
+};
+
+function compactText(value: string, maxLength = 240): string {
+  const normalized = value.replace(/\r\n/g, '\n').replace(/\s+/gu, ' ').trim();
+  if (!normalized) {
+    return '';
   }
-}
-
-function withFallback(value: string, fallback: string): string {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
-}
-
-function compactText(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/gu, ' ').trim();
   if (normalized.length <= maxLength) {
     return normalized;
   }
   return `${normalized.slice(0, maxLength).trim()}...`;
 }
 
-function formatCharacters(context: ChapterAiContext): string {
-  if (context.linkedCharacters.length === 0) {
-    return '暂无已关联角色';
-  }
-
-  return context.linkedCharacters
-    .map((character) => {
-      const parts = [character.name, character.roleType, character.summary].map((item) => item.trim()).filter(Boolean);
-      return `- ${parts.join(' / ')}`;
-    })
-    .join('\n');
+function buildSection(label: string, content: string): PromptSection {
+  return {
+    label,
+    content: content.trim() || '暂无可用内容'
+  };
 }
 
-function formatLore(context: ChapterAiContext): string {
-  if (context.linkedLore.length === 0) {
-    return '暂无已关联设定';
+function buildList(lines: string[], emptyText: string): string {
+  if (lines.length === 0) {
+    return emptyText;
   }
-
-  return context.linkedLore
-    .map((entry) => {
-      const parts = [entry.title, entry.type, entry.summary].map((item) => item.trim()).filter(Boolean);
-      return `- ${parts.join(' / ')}`;
-    })
-    .join('\n');
-}
-
-function formatReferenceChapters(context: ChapterAiContext): string {
-  if (context.referenceChapters.length === 0) {
-    return '暂无参考章节';
-  }
-
-  return context.referenceChapters
-    .map((item) => {
-      const summary = withFallback(item.outlineUser, '暂未填写摘要');
-      return `- 第 ${item.number} 章《${item.title}》 [${item.mode}] / ${summary}`;
-    })
-    .join('\n');
-}
-
-function formatCreatedPits(context: ChapterAiContext): string {
-  if (context.createdPits.length === 0) {
-    return '本章未埋坑';
-  }
-
-  return context.createdPits.map((pit) => `- ${pit.content}`).join('\n');
-}
-
-function formatResolvedPits(context: ChapterAiContext): string {
-  if (context.resolvedPits.length === 0) {
-    return '本章未填坑';
-  }
-
-  return context.resolvedPits
-    .map((pit) => `- ${pit.content}（来源：${pit.originLabel}）`)
-    .join('\n');
-}
-
-function buildReferenceSections(context: ChapterAiContext): PromptSection[] {
-  return [
-    {
-      label: '当前章节',
-      content: `第 ${context.chapter.number} 章《${withFallback(context.chapter.title, '未填写章节标题')}》`
-    },
-    {
-      label: '本章目标',
-      content: withFallback(context.chapter.goal, '未填写本章目标')
-    },
-    {
-      label: '本章摘要',
-      content: withFallback(context.chapter.outlineUser, '未填写本章摘要')
-    },
-    {
-      label: '章末钩子 / 下一章引子',
-      content: withFallback(context.chapter.nextHook, '未填写章末钩子 / 下一章引子')
-    },
-    {
-      label: '已关联角色',
-      content: formatCharacters(context)
-    },
-    {
-      label: '已关联设定',
-      content: formatLore(context)
-    },
-    {
-      label: '参考章节',
-      content: formatReferenceChapters(context)
-    },
-    {
-      label: '本章填坑',
-      content: formatResolvedPits(context)
-    },
-    {
-      label: '本章埋坑',
-      content: formatCreatedPits(context)
-    }
-  ];
-}
-
-function buildSummaryReferenceSections(context: ChapterAiContext): PromptSection[] {
-  return [
-    {
-      label: '当前章节',
-      content: `第 ${context.chapter.number} 章《${withFallback(context.chapter.title, '未填写章节标题')}》`
-    },
-    {
-      label: '本章目标',
-      content: withFallback(context.chapter.goal, '未填写本章目标')
-    },
-    {
-      label: '章末钩子 / 下一章引子',
-      content: withFallback(context.chapter.nextHook, '未填写章末钩子 / 下一章引子')
-    },
-    {
-      label: '已关联角色',
-      content: formatCharacters(context)
-    },
-    {
-      label: '已关联设定',
-      content: formatLore(context)
-    },
-    {
-      label: '参考章节',
-      content: formatReferenceChapters(context)
-    },
-    {
-      label: '本章填坑',
-      content: formatResolvedPits(context)
-    },
-    {
-      label: '本章埋坑',
-      content: formatCreatedPits(context)
-    },
-    {
-      label: '当前正文（节选）',
-      content: withFallback(compactText(context.chapter.content, 320), '当前正文为空')
-    }
-  ];
-}
-
-function buildTaskSections(context: ChapterAiContext, referenceSections: PromptSection[]): PromptSection[] {
-  if (context.taskType === 'generateChapterTitle' || context.taskType === 'generateChapterGoal') {
-    return [
-      {
-        label: '任务类型',
-        content: taskLabel(context.taskType)
-      },
-      {
-        label: '项目信息',
-        content: [withFallback(context.project.title, '未填写项目标题'), withFallback(context.project.description, '未填写项目简介')].join('\n')
-      },
-      ...referenceSections
-    ];
-  }
-
-  if (context.taskType === 'generateChapterPitsFromContent') {
-    return [
-      {
-        label: '任务类型',
-        content: taskLabel(context.taskType)
-      },
-      {
-        label: '项目信息',
-        content: [withFallback(context.project.title, '未填写项目标题'), withFallback(context.project.description, '未填写项目简介')].join('\n')
-      },
-      ...referenceSections,
-      {
-        label: '当前正文',
-        content: withFallback(context.chapter.content, '当前正文为空')
-      }
-    ];
-  }
-
-  if (context.taskType === 'summarizeChapterFromContent') {
-    return [
-      {
-        label: '任务类型',
-        content: taskLabel(context.taskType)
-      },
-      {
-        label: '项目信息',
-        content: [withFallback(context.project.title, '未填写项目标题'), withFallback(context.project.description, '未填写项目简介')].join('\n')
-      },
-      ...referenceSections,
-      {
-        label: '当前正文',
-        content: withFallback(context.chapter.content, '当前正文为空')
-      }
-    ];
-  }
-
-  return [
-    {
-      label: '任务类型',
-      content: taskLabel(context.taskType)
-    },
-    {
-      label: '项目信息',
-      content: [withFallback(context.project.title, '未填写项目标题'), withFallback(context.project.description, '未填写项目简介')].join('\n')
-    },
-    ...referenceSections,
-    {
-      label: '当前正文',
-      content: withFallback(context.chapter.content, '当前正文为空')
-    }
-  ];
+  return lines.map((line) => `- ${line}`).join('\n');
 }
 
 function buildReferenceText(sections: PromptSection[]): string {
-  return sections.map((section) => `【${section.label}】\n${section.content}`).join('\n\n');
+  return sections
+    .map((section) => `【${section.label}】\n${section.content}`)
+    .join('\n\n')
+    .trim();
 }
 
-function buildSystemPrompt(taskType: ChapterAiContext['taskType']): string {
-  switch (taskType) {
+function formatCharacters(context: ChapterAiContext): string {
+  return buildList(
+    context.linkedCharacters.map((character) => [character.name, character.roleType, character.summary].filter((item) => item.trim().length > 0).join(' / ')),
+    '暂无已关联角色'
+  );
+}
+
+function formatLore(context: ChapterAiContext): string {
+  return buildList(
+    context.linkedLore.map((entry) => [entry.title, entry.type, entry.summary].filter((item) => item.trim().length > 0).join(' / ')),
+    '暂无已关联设定'
+  );
+}
+
+function formatReferenceChapters(context: ChapterAiContext): string {
+  return buildList(
+    context.referenceChapters.map((chapter) => `第 ${chapter.number} 章《${chapter.title}》 [${chapter.mode}] ${chapter.outlineUser || '暂未填写梗概'}`),
+    '暂无历史章节引用'
+  );
+}
+
+function formatPlannedPits(context: ChapterAiContext): string {
+  return buildList(
+    context.plannedPits.map((plan) => `${plan.content}（来源：${plan.originLabel}）`),
+    '暂无计划回应坑'
+  );
+}
+
+function formatForeshadowNotes(context: ChapterAiContext): string {
+  return buildList(context.chapter.foreshadowNotes, '暂无本章伏笔');
+}
+
+function formatPitReviews(context: ChapterAiContext): string {
+  return buildList(
+    context.pitReviews.map((review) => `${review.content}（结果：${review.outcome}${review.note ? `；说明：${review.note}` : ''}）`),
+    '暂无填坑总结'
+  );
+}
+
+function formatPitCandidates(context: ChapterAiContext): string {
+  return buildList(
+    context.pitCandidates.map((candidate) => `${candidate.content}（状态：${candidate.status}）`),
+    '暂无埋坑确认候选'
+  );
+}
+
+function buildSectionsForTask(context: ChapterAiContext): PromptSection[] {
+  switch (context.taskType) {
+    case 'summarizeChapterFromContent':
+      return [buildSection('当前正文', context.chapter.content)];
     case 'generateChapterTitle':
       return [
-        '你是长篇小说创作助手。',
-        '请基于给定的章节参考上下文，输出一个适合作为当前章标题的中文候选。',
-        '要求：简洁、聚焦、像小说章节名，不要解释，不要分点。'
-      ].join('\n');
+        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
+        buildSection('本章目标', context.chapter.goal),
+        buildSection('章末钩子 / 下一章引子', context.chapter.nextHook),
+        buildSection('已关联角色', formatCharacters(context)),
+        buildSection('已关联设定', formatLore(context)),
+        buildSection('参考章节', formatReferenceChapters(context)),
+        buildSection('本章线索', formatPlannedPits(context)),
+        buildSection('本章伏笔', formatForeshadowNotes(context)),
+        buildSection('正文摘要预览', compactText(context.chapter.content, 500))
+      ];
     case 'generateChapterGoal':
       return [
-        '你是长篇小说创作助手。',
-        '请基于给定的章节参考上下文，输出一条适合作为“本章目标”的中文候选。',
-        '要求：一句话说明本章要推进的核心任务、冲突或结果，不要解释，不要分点。'
-      ].join('\n');
+        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
+        buildSection('章末钩子 / 下一章引子', context.chapter.nextHook),
+        buildSection('已关联角色', formatCharacters(context)),
+        buildSection('已关联设定', formatLore(context)),
+        buildSection('参考章节', formatReferenceChapters(context)),
+        buildSection('本章线索', formatPlannedPits(context)),
+        buildSection('本章伏笔', formatForeshadowNotes(context)),
+        buildSection('正文摘要预览', compactText(context.chapter.content, 500))
+      ];
+    case 'generateChapterNextHook':
+      return [
+        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
+        buildSection('本章目标', context.chapter.goal),
+        buildSection('当前正文', compactText(context.chapter.content, 1200)),
+        buildSection('本章正式摘要', context.chapter.outlineUser),
+        buildSection('已关联角色', formatCharacters(context)),
+        buildSection('已关联设定', formatLore(context)),
+        buildSection('参考章节', formatReferenceChapters(context)),
+        buildSection('本章线索', formatPlannedPits(context)),
+        buildSection('填坑总结', formatPitReviews(context)),
+        buildSection('本章伏笔', formatForeshadowNotes(context))
+      ];
     case 'generateChapterPitsFromContent':
       return [
-        '你是长篇小说创作助手。',
-        '请根据当前章节正文为主，并参考当前章节规划与上下文，生成 2 到 4 条值得后文回应的坑位候选。',
-        '要求：',
-        '1. 每行一条。',
-        '2. 聚焦未解问题、伏笔、线索或悬念。',
-        '3. 不要输出编号，不要解释。'
-      ].join('\n');
-    case 'summarizeChapterFromContent':
+        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
+        buildSection('本章目标', context.chapter.goal),
+        buildSection('章末钩子 / 下一章引子', context.chapter.nextHook),
+        buildSection('当前正文', compactText(context.chapter.content, 1500))
+      ];
+    case 'reviewChapterPitResponses':
       return [
-        '你是长篇小说创作助手。',
-        '你的任务是严格根据当前章节正文里已经实际写出的内容，生成一段适合作为本章摘要的中文文本。',
-        '输出要求：',
-        '1. 输出一段简洁、可直接写入本章摘要的中文文本。',
-        '2. 只根据当前正文生成，不要把已有摘要、目标、钩子、参考章节重新改写进结果。',
-        '3. 不要递归套用旧摘要，不要回显提示词，不要输出分析过程。',
-        '4. 不要分点，不要使用标题。'
-      ].join('\n');
+        buildSection('当前正文', compactText(context.chapter.content, 1500)),
+        buildSection('本章计划回应坑', formatPlannedPits(context))
+      ];
+    case 'reviewChapterPitCandidates':
+      return [
+        buildSection('当前正文', compactText(context.chapter.content, 1800))
+      ];
+    case 'proposeOutlineUpdate':
+      return [
+        buildSection('当前正文', compactText(context.chapter.content, 1500)),
+        buildSection('当前摘要', context.chapter.outlineUser)
+      ];
+    case 'generateChapterSuggestions':
+      return [
+        buildSection('当前正文', compactText(context.chapter.content, 1500)),
+        buildSection('参考章节', formatReferenceChapters(context))
+      ];
     default:
-      return '你是长篇小说创作助手，请根据提供的结构化上下文输出中文结果。';
+      return [buildSection('当前正文', compactText(context.chapter.content, 1500))];
   }
 }
 
-function buildUserPrompt(sections: PromptSection[]): string {
-  return sections.map((section) => `【${section.label}】\n${section.content}`).join('\n\n');
+function buildSystemPrompt(taskType: AiTaskType): string {
+  switch (taskType) {
+    case 'summarizeChapterFromContent':
+      return '你是小说编辑助手。只基于提供的当前正文生成一段“本章摘要”。不要重复原文，不要编造不存在的信息。';
+    case 'generateChapterTitle':
+      return '你是小说编辑助手。请基于上下文给出一个简洁、有辨识度的章节标题候选，仅输出标题文本本身。';
+    case 'generateChapterGoal':
+      return '你是小说编辑助手。请基于上下文给出一个清晰的本章目标候选，仅输出一段目标文本。';
+    case 'generateChapterNextHook':
+      return '你是小说编辑助手。请基于上下文给出一个章末钩子候选，强调下一章牵引力。仅输出候选文本。';
+    case 'generateChapterPitsFromContent':
+      return '你是小说编辑助手。请基于当前章节正文提炼 2-4 条可作为后续伏笔/未解线索的候选，每行一条。';
+    case 'reviewChapterPitResponses':
+      return '你是小说写作验收助手。请仅输出 JSON：{"items":[{"pitId":"...","outcome":"none|partial|clear|resolved","note":"..."}]}。pitId 必须来自输入。';
+    case 'reviewChapterPitCandidates':
+      return '你是小说写作验收助手。请仅输出 JSON：{"existingItems":[{"candidateId":"...","status":"draft|weak|confirmed|discarded"}],"newItems":[{"content":"...","status":"weak|confirmed"}]}。根据正文判断“本章伏笔”是否成立，并可补充正文中新出现的有效新坑候选。';
+    default:
+      return '你是小说编辑助手。请根据输入上下文输出可直接使用的候选文本。';
+  }
 }
 
-export class PromptBuilder {
-  public build(context: ChapterAiContext): PromptPayload {
-    const referenceSections = context.taskType === 'summarizeChapterFromContent' ? buildSummaryReferenceSections(context) : buildReferenceSections(context);
-    const sections = buildTaskSections(context, referenceSections);
+function buildUserPrompt(taskLabel: string, referenceText: string, transientInstruction?: string): string {
+  const parts = [`任务：${taskLabel}`];
+  if (transientInstruction && transientInstruction.trim()) {
+    parts.push(`本次提示词：${transientInstruction.trim()}`);
+  }
+  parts.push('上下文：');
+  parts.push(referenceText);
+  return parts.join('\n\n');
+}
+
+function taskLabelFor(taskType: AiTaskType): string {
+  switch (taskType) {
+    case 'summarizeChapterFromContent':
+      return '提炼本章摘要';
+    case 'generateChapterTitle':
+      return '生成章节标题候选';
+    case 'generateChapterGoal':
+      return '生成本章目标候选';
+    case 'generateChapterNextHook':
+      return '生成章末钩子候选';
+    case 'generateChapterPitsFromContent':
+      return '生成本章伏笔候选';
+    case 'reviewChapterPitResponses':
+      return '生成填坑总结候选';
+    case 'reviewChapterPitCandidates':
+      return '分析埋坑确认候选';
+    case 'proposeOutlineUpdate':
+      return '更新摘要建议';
+    case 'generateChapterSuggestions':
+      return '生成章节建议';
+    default:
+      return 'AI 任务';
+  }
+}
+
+class PromptBuilder {
+  public build(context: ChapterAiContext, options: BuildPromptOptions = {}): PromptPayload {
+    const sections = buildSectionsForTask(context);
+    const referenceText = buildReferenceText(sections);
+    const taskLabel = taskLabelFor(context.taskType);
 
     return {
       taskType: context.taskType,
-      taskLabel: taskLabel(context.taskType),
-      referenceText: buildReferenceText(referenceSections),
+      taskLabel,
       sections,
+      referenceText,
       systemPrompt: buildSystemPrompt(context.taskType),
-      userPrompt: buildUserPrompt(sections),
+      userPrompt: buildUserPrompt(taskLabel, referenceText, options.transientInstruction),
+      transientInstruction: options.transientInstruction?.trim() || undefined,
       context
     };
   }

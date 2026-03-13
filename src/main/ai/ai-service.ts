@@ -39,8 +39,20 @@ export class AIService {
     return this.ensureTextResult('generateChapterGoal', this.provider.generateChapterGoal(payload));
   }
 
+  public generateChapterNextHook(payload: PromptPayload): Promise<AiTextResult> {
+    return this.ensureTextResult('generateChapterNextHook', this.provider.generateChapterNextHook(payload));
+  }
+
   public generateChapterPitsFromContent(payload: PromptPayload): Promise<AiTextResult> {
     return this.ensureTextResult('generateChapterPitsFromContent', this.provider.generateChapterPitsFromContent(payload));
+  }
+
+  public reviewChapterPitResponses(payload: PromptPayload): Promise<AiTextResult> {
+    return this.ensureTextResult('reviewChapterPitResponses', this.provider.reviewChapterPitResponses(payload));
+  }
+
+  public reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult> {
+    return this.ensureTextResult('reviewChapterPitCandidates', this.provider.reviewChapterPitCandidates(payload));
   }
 
   public proposeOutlineUpdate(payload: PromptPayload): Promise<AiTextResult> {

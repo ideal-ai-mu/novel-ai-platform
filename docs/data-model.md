@@ -223,20 +223,29 @@ type ChapterAiContext = {
     outlineUser: string;
     updatedAt: string;
   }>;
-  createdPits: Array<{
-    id: string;
-    content: string;
-  }>;
-  resolvedPits: Array<{
+  plannedPits: Array<{
     id: string;
     content: string;
     originLabel: string;
+    progressStatus: 'unaddressed' | 'partial' | 'clear' | 'resolved';
+  }>;
+  pitReviews: Array<{
+    id: string;
+    content: string;
+    outcome: 'none' | 'partial' | 'clear' | 'resolved';
+    note?: string | null;
+  }>;
+  pitCandidates: Array<{
+    id: string;
+    content: string;
+    status: 'draft' | 'weak' | 'confirmed' | 'discarded';
   }>;
   task: {
     type:
       | 'summarizeChapterFromContent'
       | 'generateChapterTitle'
       | 'generateChapterGoal'
+      | 'generateChapterNextHook'
       | 'getPitSuggestions';
   };
 };
@@ -361,3 +370,250 @@ type StoryPitGroupedOverview = {
   - 参考章节
   - 填坑 / 埋坑
 - 不把当前 `outline_user` 本身重新作为输入回灌。
+
+## 12. 本轮补充：章节摘要的入口与真源
+
+1. `Chapter.outline_user` 继续作为章节正式摘要的唯一真源。
+2. 本轮不新增任何“章节记忆卡 / 摘要卡”实体。
+3. “章节规划层中不再直接编辑摘要”只是 UI 入口调整，不改变 `outline_user` 的数据语义。
+4. `章节摘要总览` 继续直接聚合与编辑 `Chapter.outline_user`。
+
+### 12.1 UI 语义调整
+
+- 章节规划层不再展示 `outline_user` 的常驻编辑框。
+- 正文层通过 `AI 提取摘要` 生成候选摘要并写回 `outline_user`。
+- 项目级 `章节摘要总览` 允许直接编辑并自动保存 `outline_user`。
+
+### 12.2 新建章节时的初始摘要
+
+本轮允许系统在创建章节后立即为 `outline_user` 写入一版初始摘要，用于：
+
+- 让新章节在 `章节摘要总览` 中立即可见
+- 让 AI 续写 / 参考链在创建后就拥有最小摘要上下文
+
+该初始摘要仍然写入 `Chapter.outline_user`，不是单独的新字段。
+
+### 12.3 摘要提炼时的输入约束
+
+`ContextAssembler` 可以继续组装完整章节上下文，但在 `summarizeChapterFromContent` 任务中：
+
+- `chapter.content` 是首要输入
+- `title / goal / next_hook / linkedCharacters / linkedLore / referenceChapters / pits` 可作为辅助输入
+- 当前 `chapter.outlineUser` 不重新作为摘要提炼的主要输入
+
+### 12.4 领域对象说明
+
+可继续沿用：
+
+```ts
+type ChapterAiContext = {
+  project: { id: string; title: string; description?: string }
+  chapter: {
+    id: string
+    number: number
+    title: string
+    goal: string
+    outlineUser: string
+    nextHook: string
+    content: string
+  }
+  linkedCharacters: Array<...>
+  linkedLore: Array<...>
+  referenceChapters: Array<...>
+  resolvedPits: Array<...>
+  createdPits: Array<...>
+}
+```
+
+其中：
+- `outlineUser` 作为当前正式摘要继续保留在领域对象中，供非摘要任务使用
+- 但摘要提炼任务可以选择不把该字段重新拼入模型主输入
+
+## 13. 本轮补充：摘要字段的可见位置与提取约束
+
+1. `Chapter.outline_user` 继续作为正式摘要唯一真源。
+2. 本轮不改变字段本身，但改变其主要 UI 入口：
+   - 不再在章节规划层直接展示
+   - 改为在正文层下方编辑
+   - 改为在章节摘要总览中集中编辑
+3. `outline_user` 的保存逻辑继续复用 `chapter.update`，不新增新摘要实体。
+
+### 13.1 摘要提取任务的输入边界
+
+在 `summarizeChapterFromContent` 任务中：
+
+- 只使用 `chapter.content`
+- 不再把其他上下文对象拼入摘要提取输入
+- 当前 `outline_user` 也不得回灌进摘要生成
+
+这是一条严格边界，用于避免：
+- 摘要递归套娃
+- 规划信息混入“已发生正文摘要”
+- 参考章节内容覆盖当前章节正文事实
+
+## 14. 本轮补充：一次性提示词不是持久化数据
+
+- `AI 提取摘要` 的提示词可以在 UI 中临时编辑。
+- 该提示词只作为一次性调用参数传给 main / AI provider。
+- 不新增数据库字段，不写入 `Chapter`，也不写入其他实体。
+- `Chapter.outline_user` 仍然是唯一需要保存的正式摘要结果。
+
+## 15. ֲ䣺һʾȻǳ־û
+
+ְժҪ /  / Ŀ AI ͳһĳɵڱ༭ʾʣģͲ־ûֶΣ
+
+- `promptText` ֻ renderer ǰ״̬ IPC òС
+- д `Chapter`
+- д `NovelProject`
+-  prompt ñ
+
+`Chapter.outline_user` Ȼʽ½ժҪΨһԴ
+
+## 16. ֲ䣺ʾȻ־ûĿȥ
+
+1. `generateChapterGoal` ģȥ `chapter.goal` ûعࡣ
+2. ⲻκݿֶΡ
+3. ӡһʾֻͬڵǰ״̬ IPC У־û
+
+## 17. 本轮补充：正式坑、计划回应、验收结果、埋坑候选分层
+
+### StoryPit
+
+正式坑实体仍命名为 `StoryPit`，建议字段至少包括：
+
+- `id`
+- `project_id`
+- `type`：`chapter` / `manual`
+- `origin_chapter_id`：nullable
+- `content`
+- `progress_status`：`unaddressed` / `partial` / `clear` / `resolved`
+- `resolved_in_chapter_id`：nullable
+- `created_at`
+- `updated_at`
+
+语义说明：
+
+1. `type = chapter`
+   - 表示经正文确认后成立的章节坑。
+2. `type = manual`
+   - 表示作者手动设定并直接入库的正式坑。
+3. 章节坑不是 AI 候选一出现就入库，而是在“埋坑确认 = 有效埋下”后才生成正式 `StoryPit(type=chapter)`。
+
+### ChapterPitPlan
+
+`ChapterPitPlan` 表示当前章节准备回应哪些既有坑。
+
+- `id`
+- `chapter_id`
+- `pit_id`
+- `created_at`
+- `updated_at`
+
+语义说明：
+
+1. 它表示“计划回应”。
+2. 它不等于已经填完。
+
+### ChapterPitReview
+
+`ChapterPitReview` 表示正文完成后，当前章节对计划回应坑的验收结果。
+
+- `id`
+- `chapter_id`
+- `pit_id`
+- `outcome`：`none` / `partial` / `clear` / `resolved`
+- `note`：nullable
+- `created_at`
+- `updated_at`
+
+语义说明：
+
+1. 这是正文后的验收记录。
+2. 它记录本章对既有坑的实际处理程度，而不是正文前的计划。
+
+### ChapterPitCandidate
+
+`ChapterPitCandidate` 表示当前章节的埋坑候选。
+
+- `id`
+- `chapter_id`
+- `content`
+- `status`：`draft` / `weak` / `confirmed` / `discarded`
+- `created_at`
+- `updated_at`
+
+语义说明：
+
+1. 这是正文前的候选，不是正式坑。
+2. 只有 `confirmed` 后，才转成正式 `StoryPit(type=chapter)`。
+
+## 18. 本轮补充：Chapter.outline_user 仍然是本章正式摘要
+
+1. `Chapter.outline_user` 继续作为本章正式摘要的唯一真源。
+2. “本章正式摘要”属于正文后的收束结果，不新增新的摘要实体。
+3. 项目级摘要总览仍然直接聚合和展示 `Chapter.outline_user`。
+
+## 19. 本轮补充：坑位语义与唯一真源
+
+1. 项目级正式坑总览直接读取 `StoryPit`。
+2. 当前章节计划回应哪些坑，读取 `ChapterPitPlan`。
+3. 当前章节对这些坑的最终处理结果，读取 `ChapterPitReview`。
+4. 当前章节准备埋哪些候选线索，读取 `ChapterPitCandidate`。
+5. 正文前的候选和计划，不应混入项目级正式坑总览。
+
+## 20. 本轮补充：收束层交互不新增新表
+
+1. “填坑总结 / 埋坑确认”改成缩略卡片 + 详情弹窗，只是 renderer 交互变化。
+2. 详情弹窗编辑后仍然分别写回：
+   - `ChapterPitReview`
+   - `ChapterPitCandidate`
+   - `StoryPit`
+3. “收束完成度”只是运行时聚合信息，不新增数据库表。
+
+## 21. 本轮补充：收束层 AI 候选结果不新增持久化实体
+
+1. 填坑总结 AI 的返回结果，作为临时候选对象存在于当前会话，不新增新表。
+2. 埋坑确认 AI 的返回结果，同样作为临时候选对象存在于当前会话，不新增新表。
+3. 当用户确认应用后，再分别写入：
+   - `ChapterPitReview`
+   - `ChapterPitCandidate`
+   - `StoryPit`
+4. AI 从正文中额外识别出的“新埋坑线索”，先以临时候选文本返回；只有用户确认后，才创建新的 `ChapterPitCandidate`。
+## 22. 本轮补充：前置规划数据与正文后验收数据分开展示
+
+- `ChapterPitPlan` 仍表示“本章计划回应哪些已有坑”。
+- `ChapterPitCandidate` 仍表示“本章准备埋下哪些伏笔候选”。
+- `ChapterPitReview` 仍表示正文完成后对计划回应坑的实际验收结果。
+- `ChapterPitCandidate.status` 仍表示正文完成后对伏笔候选的确认结果。
+- 但在产品展示层：
+  - `ChapterPitPlan` 和 `ChapterPitCandidate` 的列表不直接显示正文后验收状态
+  - `ChapterPitReview` 与 `ChapterPitCandidate.status` 主要用于“本章收束 / 验收层”
+- 也就是说：
+  - 数据层可以继续复用同一组实体
+  - 展示层必须把“正文前计划”与“正文后结果”拆开
+
+## 23. 本轮补充：本章伏笔独立字段
+
+- `Chapter.foreshadow_notes_json: string[]` 用于正文前“本章伏笔”规划。
+- `ChapterPitCandidate` 继续用于正文后“埋坑确认”。
+- 两者不做实时双向绑定，不共享同一 UI 列表。
+- 在“AI 分析埋坑”流程中，可将 `foreshadow_notes_json` 作为输入上下文，生成或更新 `ChapterPitCandidate` 候选。
+
+## 24. 本轮同步：数据层口径对齐（2026-03-13）
+
+1. 本轮未新增数据库实体，核心仍为：
+   - `Chapter`
+   - `StoryPit`
+   - `ChapterPitPlan`
+   - `ChapterPitReview`
+   - `ChapterPitCandidate`
+2. 以下为会话态信息，不落库：
+   - 关联小卡片随机色映射（renderer 运行时状态）
+   - AI 识别新增埋坑候选的 UI 标识
+   - 各 AI 操作的“本次提示词”
+3. 收束层一键 AI 应用后的落库口径保持：
+   - 填坑总结写入 `ChapterPitReview`，并按规则同步 `StoryPit.progress_status` / `resolved_in_chapter_id`
+   - 埋坑确认写入 `ChapterPitCandidate.status`
+   - AI 识别出的新增候选先创建为 `ChapterPitCandidate`，确认后再进入转正流程
+4. 仅 `confirmed` 的埋坑候选可转为正式 `StoryPit(type=chapter)`。
+5. `Chapter.outline_user` 仍是章节正式摘要唯一真源，不新增摘要副本表。

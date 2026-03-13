@@ -10,6 +10,7 @@ import type {
   AppInitData,
   ChapterApplyGeneratedPitsInput,
   ChapterAutoPickContextRefsInput,
+  ChapterClearPitReviewInput,
   ChapterContextRef,
   ChapterContextRefAddInput,
   ChapterContextRefRemoveInput,
@@ -17,8 +18,10 @@ import type {
   ChapterContextRefView,
   ChapterContextRefsGetInput,
   ChapterCreatePitFromSuggestionInput,
+  ChapterCreatePitCandidateManualInput,
   ChapterCreatePitManualInput,
   ChapterCreatePitInput,
+  ChapterDeletePitCandidateInput,
   ChapterGetPitSuggestionsInput,
   ChapterOutlineOverviewItem,
   ChapterRefs,
@@ -27,10 +30,25 @@ import type {
   ChapterCreateInput,
   ChapterGeneratePitsFromContentInput,
   ChapterGeneratePitsFromContentResult,
+  ChapterListPitCandidatesInput,
+  ChapterListPitReviewsInput,
+  ChapterListPlannedPitsInput,
   ChapterListCreatedPitsInput,
   ChapterListResolvedPitsInput,
+  ChapterPitCandidate,
+  ChapterPitCandidateStatus,
+  ChapterPitPlan,
+  ChapterPitPlanView,
+  ChapterPitReview,
+  ChapterPitReviewOutcome,
+  ChapterPitReviewView,
+  ChapterPlanPitResponseInput,
+  ChapterReviewPitCandidateInput,
+  ChapterReviewPitResponseInput,
   ChapterResolvePitInput,
+  ChapterUnplanPitResponseInput,
   ChapterUnresolvePitInput,
+  ChapterUpdatePitCandidateInput,
   Character,
   CharacterCreateInput,
   CharacterUpdateInput,
@@ -51,6 +69,7 @@ import type {
   ProjectCreateInput,
   StoryPit,
   StoryPitCreationMethod,
+  StoryPitProgressStatus,
   StoryPitStatus,
   StoryPitType,
   StoryPitView,
@@ -63,7 +82,7 @@ import type {
   SuggestionListByEntityInput
 } from '../../shared/ipc';
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 4;
 const DOT_PATH_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$/;
 
 type SqlJsStatement = {
@@ -95,6 +114,8 @@ type ChapterRow = Record<
   | 'goal'
   | 'outline_ai'
   | 'outline_user'
+  | 'planning_clues_json'
+  | 'foreshadow_notes_json'
   | 'content'
   | 'next_hook'
   | 'word_count'
@@ -150,6 +171,7 @@ type StoryPitRow = Record<
   | 'creation_method'
   | 'content'
   | 'status'
+  | 'progress_status'
   | 'resolved_in_chapter_id'
   | 'sort_order'
   | 'note'
@@ -161,6 +183,9 @@ type StoryPitRow = Record<
   | 'resolved_in_chapter_title',
   unknown
 >;
+type ChapterPitPlanRow = Record<'id' | 'chapter_id' | 'pit_id' | 'created_at' | 'updated_at', unknown>;
+type ChapterPitReviewRow = Record<'id' | 'chapter_id' | 'pit_id' | 'outcome' | 'note' | 'created_at' | 'updated_at', unknown>;
+type ChapterPitCandidateRow = Record<'id' | 'chapter_id' | 'content' | 'status' | 'story_pit_id' | 'created_at' | 'updated_at', unknown>;
 
 export class AppError extends Error {
   public readonly code: string;
@@ -260,6 +285,8 @@ function mapChapter(row: ChapterRow): Chapter {
     goal: String(row.goal ?? ''),
     outline_ai: String(row.outline_ai ?? ''),
     outline_user: String(row.outline_user ?? ''),
+    planning_clues_json: parseStringArray(typeof row.planning_clues_json === 'string' ? row.planning_clues_json : '[]'),
+    foreshadow_notes_json: parseStringArray(typeof row.foreshadow_notes_json === 'string' ? row.foreshadow_notes_json : '[]'),
     content: String(row.content ?? ''),
     next_hook: String(row.next_hook ?? ''),
     word_count: Number(row.word_count ?? 0),
@@ -329,6 +356,27 @@ function ensureStoryPitStatus(status: unknown): StoryPitStatus {
   throw new AppError('VALIDATION_ERROR', 'Invalid story pit status');
 }
 
+function ensureStoryPitProgressStatus(status: unknown): StoryPitProgressStatus {
+  if (status === 'unaddressed' || status === 'partial' || status === 'clear' || status === 'resolved') {
+    return status;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid story pit progress status');
+}
+
+function ensureChapterPitReviewOutcome(outcome: unknown): ChapterPitReviewOutcome {
+  if (outcome === 'none' || outcome === 'partial' || outcome === 'clear' || outcome === 'resolved') {
+    return outcome;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid chapter pit review outcome');
+}
+
+function ensureChapterPitCandidateStatus(status: unknown): ChapterPitCandidateStatus {
+  if (status === 'draft' || status === 'weak' || status === 'confirmed' || status === 'discarded') {
+    return status;
+  }
+  throw new AppError('VALIDATION_ERROR', 'Invalid chapter pit candidate status');
+}
+
 function buildContentExcerpt(content: string, maxLength = 120): string {
   const normalized = content.replace(/\s+/gu, ' ').trim();
   if (!normalized) {
@@ -367,6 +415,7 @@ function mapStoryPit(row: StoryPitRow): StoryPitView {
     creation_method: ensureStoryPitCreationMethod(row.creation_method),
     content: String(row.content ?? ''),
     status: ensureStoryPitStatus(row.status),
+    progress_status: ensureStoryPitProgressStatus(row.progress_status ?? (row.status === 'resolved' ? 'resolved' : 'unaddressed')),
     resolved_in_chapter_id:
       row.resolved_in_chapter_id === null || row.resolved_in_chapter_id === undefined ? null : String(row.resolved_in_chapter_id),
     sort_order: row.sort_order === null || row.sort_order === undefined ? null : Number(row.sort_order),
@@ -385,6 +434,40 @@ function mapStoryPit(row: StoryPitRow): StoryPitView {
       row.resolved_in_chapter_title === null || row.resolved_in_chapter_title === undefined
         ? null
         : String(row.resolved_in_chapter_title)
+  };
+}
+
+function mapChapterPitPlan(row: ChapterPitPlanRow): ChapterPitPlan {
+  return {
+    id: String(row.id),
+    chapter_id: String(row.chapter_id),
+    pit_id: String(row.pit_id),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at)
+  };
+}
+
+function mapChapterPitReview(row: ChapterPitReviewRow): ChapterPitReview {
+  return {
+    id: String(row.id),
+    chapter_id: String(row.chapter_id),
+    pit_id: String(row.pit_id),
+    outcome: ensureChapterPitReviewOutcome(row.outcome),
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at)
+  };
+}
+
+function mapChapterPitCandidate(row: ChapterPitCandidateRow): ChapterPitCandidate {
+  return {
+    id: String(row.id),
+    chapter_id: String(row.chapter_id),
+    content: String(row.content ?? ''),
+    status: ensureChapterPitCandidateStatus(row.status),
+    story_pit_id: row.story_pit_id === null || row.story_pit_id === undefined ? null : String(row.story_pit_id),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at)
   };
 }
 
@@ -695,6 +778,7 @@ export class AppDatabase {
   public listChapters(projectId: string): Chapter[] {
     const rows = this.queryAll<ChapterRow>(
       `SELECT id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user,
+              planning_clues_json, foreshadow_notes_json,
               content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
        FROM chapters
        WHERE project_id = ?
@@ -736,6 +820,8 @@ export class AppDatabase {
       goal: input.goal ?? '',
       outline_ai: input.outlineAi ?? '',
       outline_user: input.outlineUser ?? '',
+      planning_clues_json: input.planningCluesJson ?? [],
+      foreshadow_notes_json: input.foreshadowNotesJson ?? [],
       content,
       next_hook: input.nextHook ?? '',
       word_count: countWords(content),
@@ -748,9 +834,9 @@ export class AppDatabase {
 
     this.run(
       `INSERT INTO chapters (
-         id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user, content, next_hook,
-         word_count, revision, confirmed_fields_json, created_at, updated_at, source
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user, planning_clues_json,
+         foreshadow_notes_json, content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         chapter.id,
         chapter.project_id,
@@ -761,6 +847,8 @@ export class AppDatabase {
         chapter.goal,
         chapter.outline_ai,
         chapter.outline_user,
+        JSON.stringify(chapter.planning_clues_json),
+        JSON.stringify(chapter.foreshadow_notes_json),
         chapter.content,
         chapter.next_hook,
         chapter.word_count,
@@ -783,6 +871,7 @@ export class AppDatabase {
   public updateChapter(input: ChapterUpdateInput): Chapter {
     const row = this.queryOne<ChapterRow>(
       `SELECT id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user,
+              planning_clues_json, foreshadow_notes_json,
               content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
        FROM chapters
        WHERE id = ?`,
@@ -845,6 +934,12 @@ export class AppDatabase {
     }
     if (typeof patch.outline_user === 'string') {
       assign('outline_user', patch.outline_user);
+    }
+    if (patch.planning_clues_json !== undefined) {
+      assign('planning_clues_json', JSON.stringify(ensureStringArray(patch.planning_clues_json, 'planning_clues_json')));
+    }
+    if (patch.foreshadow_notes_json !== undefined) {
+      assign('foreshadow_notes_json', JSON.stringify(ensureStringArray(patch.foreshadow_notes_json, 'foreshadow_notes_json')));
     }
     if (typeof patch.content === 'string') {
       nextContent = patch.content;
@@ -1147,7 +1242,7 @@ export class AppDatabase {
     const chapter = this.getChapterOrThrow(input.chapterId);
     return this.listStoryPits(
       `p.project_id = ?
-       AND p.status = 'open'
+       AND p.progress_status != 'resolved'
        AND (
          p.type = 'manual'
          OR (
@@ -1236,6 +1331,254 @@ export class AppDatabase {
     return this.listStoryPits('p.resolved_in_chapter_id = ?', [chapter.id]);
   }
 
+  public listChapterPlannedPits(input: ChapterListPlannedPitsInput): ChapterPitPlanView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const rows = this.queryAll<ChapterPitPlanRow>(
+      `SELECT id, chapter_id, pit_id, created_at, updated_at
+       FROM chapter_pit_plans
+       WHERE chapter_id = ?
+       ORDER BY created_at ASC`,
+      [chapter.id]
+    );
+    return rows.map((row) => {
+      const plan = mapChapterPitPlan(row);
+      return {
+        ...plan,
+        pit: this.getStoryPitViewOrThrow(plan.pit_id)
+      };
+    });
+  }
+
+  public planPitResponse(input: ChapterPlanPitResponseInput): ChapterPitPlanView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const pit = this.getStoryPitOrThrow(input.pitId);
+    this.validatePitResolvableForChapter(chapter, pit);
+
+    const existing = this.queryOne<{ id: unknown }>(
+      `SELECT id FROM chapter_pit_plans WHERE chapter_id = ? AND pit_id = ?`,
+      [chapter.id, pit.id]
+    );
+    if (!existing) {
+      const timestamp = nowIso();
+      this.run(
+        `INSERT INTO chapter_pit_plans (id, chapter_id, pit_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [randomUUID(), chapter.id, pit.id, timestamp, timestamp]
+      );
+      this.persist();
+    }
+
+    return this.listChapterPlannedPits({ chapterId: chapter.id });
+  }
+
+  public unplanPitResponse(input: ChapterUnplanPitResponseInput): DeleteResult {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    this.getStoryPitOrThrow(input.pitId);
+    this.run(`DELETE FROM chapter_pit_plans WHERE chapter_id = ? AND pit_id = ?`, [chapter.id, input.pitId]);
+    this.run(`DELETE FROM chapter_pit_reviews WHERE chapter_id = ? AND pit_id = ?`, [chapter.id, input.pitId]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public listChapterPitReviews(input: ChapterListPitReviewsInput): ChapterPitReviewView[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const rows = this.queryAll<ChapterPitReviewRow>(
+      `SELECT id, chapter_id, pit_id, outcome, note, created_at, updated_at
+       FROM chapter_pit_reviews
+       WHERE chapter_id = ?
+       ORDER BY updated_at DESC, created_at ASC`,
+      [chapter.id]
+    );
+    return rows.map((row) => {
+      const review = mapChapterPitReview(row);
+      return {
+        ...review,
+        pit: this.getStoryPitViewOrThrow(review.pit_id)
+      };
+    });
+  }
+
+  public reviewPitResponse(input: ChapterReviewPitResponseInput): ChapterPitReviewView {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const pit = this.getStoryPitOrThrow(input.pitId);
+    this.validatePitResolvableForChapter(chapter, pit);
+    const outcome = ensureChapterPitReviewOutcome(input.outcome);
+    const note = input.note === null || input.note === undefined ? null : String(input.note).trim();
+    const timestamp = nowIso();
+    const existing = this.queryOne<{ id: unknown }>(
+      `SELECT id FROM chapter_pit_reviews WHERE chapter_id = ? AND pit_id = ?`,
+      [chapter.id, pit.id]
+    );
+
+    if (existing) {
+      this.run(
+        `UPDATE chapter_pit_reviews
+         SET outcome = ?, note = ?, updated_at = ?
+         WHERE id = ?`,
+        [outcome, note, timestamp, String(existing.id)]
+      );
+    } else {
+      this.run(
+        `INSERT INTO chapter_pit_reviews (id, chapter_id, pit_id, outcome, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [randomUUID(), chapter.id, pit.id, outcome, note, timestamp, timestamp]
+      );
+    }
+
+    const progressStatus: StoryPitProgressStatus =
+      outcome === 'resolved' ? 'resolved' : outcome === 'clear' ? 'clear' : outcome === 'partial' ? 'partial' : 'unaddressed';
+    const resolvedInChapterId = outcome === 'resolved' ? chapter.id : pit.resolved_in_chapter_id === chapter.id ? null : pit.resolved_in_chapter_id;
+    const status: StoryPitStatus = outcome === 'resolved' ? 'resolved' : resolvedInChapterId ? 'resolved' : 'open';
+    this.run(
+      `UPDATE story_pits
+       SET progress_status = ?, status = ?, resolved_in_chapter_id = ?, updated_at = ?
+       WHERE id = ?`,
+      [progressStatus, status, resolvedInChapterId, timestamp, pit.id]
+    );
+    this.persist();
+
+    const review = this.queryOne<ChapterPitReviewRow>(
+      `SELECT id, chapter_id, pit_id, outcome, note, created_at, updated_at
+       FROM chapter_pit_reviews
+       WHERE chapter_id = ? AND pit_id = ?`,
+      [chapter.id, pit.id]
+    );
+    if (!review) {
+      throw new AppError('INTERNAL_ERROR', 'Pit review was not saved');
+    }
+    return {
+      ...mapChapterPitReview(review),
+      pit: this.getStoryPitViewOrThrow(pit.id)
+    };
+  }
+
+  public clearPitReview(input: ChapterClearPitReviewInput): DeleteResult {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const pit = this.getStoryPitOrThrow(input.pitId);
+    this.run(`DELETE FROM chapter_pit_reviews WHERE chapter_id = ? AND pit_id = ?`, [chapter.id, pit.id]);
+    if (pit.resolved_in_chapter_id === chapter.id) {
+      this.run(
+        `UPDATE story_pits
+         SET progress_status = 'unaddressed', status = 'open', resolved_in_chapter_id = NULL, updated_at = ?
+         WHERE id = ?`,
+        [nowIso(), pit.id]
+      );
+    }
+    this.persist();
+    return { deleted: true };
+  }
+
+  public listChapterPitCandidates(input: ChapterListPitCandidatesInput): ChapterPitCandidate[] {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const rows = this.queryAll<ChapterPitCandidateRow>(
+      `SELECT id, chapter_id, content, status, story_pit_id, created_at, updated_at
+       FROM chapter_pit_candidates
+       WHERE chapter_id = ?
+       ORDER BY created_at ASC`,
+      [chapter.id]
+    );
+    return rows.map(mapChapterPitCandidate);
+  }
+
+  public createPitCandidateManual(input: ChapterCreatePitCandidateManualInput): ChapterPitCandidate {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const content = (input.content ?? '').trim();
+    if (!content) {
+      throw new AppError('VALIDATION_ERROR', 'Pit candidate content is required');
+    }
+    const timestamp = nowIso();
+    const id = randomUUID();
+    this.run(
+      `INSERT INTO chapter_pit_candidates (id, chapter_id, content, status, story_pit_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'draft', NULL, ?, ?)`,
+      [id, chapter.id, content, timestamp, timestamp]
+    );
+    this.persist();
+    return this.getPitCandidateOrThrow(id);
+  }
+
+  public updatePitCandidate(input: ChapterUpdatePitCandidateInput): ChapterPitCandidate {
+    const current = this.getPitCandidateOrThrow(input.candidateId);
+    const patch = input.patch ?? {};
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const assign = (column: string, value: unknown) => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (typeof patch.content === 'string') {
+      const content = patch.content.trim();
+      if (!content) {
+        throw new AppError('VALIDATION_ERROR', 'Pit candidate content cannot be empty');
+      }
+      assign('content', content);
+      if (current.story_pit_id) {
+        this.run(`UPDATE story_pits SET content = ?, updated_at = ? WHERE id = ?`, [content, nowIso(), current.story_pit_id]);
+      }
+    }
+    if (patch.status !== undefined) {
+      assign('status', ensureChapterPitCandidateStatus(patch.status));
+    }
+    if (sets.length === 0) {
+      return current;
+    }
+    assign('updated_at', nowIso());
+    values.push(current.id);
+    this.run(`UPDATE chapter_pit_candidates SET ${sets.join(', ')} WHERE id = ?`, values);
+    this.persist();
+    return this.getPitCandidateOrThrow(current.id);
+  }
+
+  public deletePitCandidate(input: ChapterDeletePitCandidateInput): DeleteResult {
+    const candidate = this.getPitCandidateOrThrow(input.candidateId);
+    if (candidate.story_pit_id) {
+      this.run(`DELETE FROM story_pits WHERE id = ?`, [candidate.story_pit_id]);
+    }
+    this.run(`DELETE FROM chapter_pit_candidates WHERE id = ?`, [candidate.id]);
+    this.persist();
+    return { deleted: true };
+  }
+
+  public reviewPitCandidate(input: ChapterReviewPitCandidateInput): ChapterPitCandidate {
+    const chapter = this.getChapterOrThrow(input.chapterId);
+    const candidate = this.getPitCandidateOrThrow(input.candidateId);
+    if (candidate.chapter_id !== chapter.id) {
+      throw new AppError('VALIDATION_ERROR', 'Candidate does not belong to the current chapter');
+    }
+    const status = ensureChapterPitCandidateStatus(input.status);
+    const timestamp = nowIso();
+    let storyPitId = candidate.story_pit_id;
+
+    if (status === 'confirmed') {
+      if (storyPitId) {
+        this.run(`UPDATE story_pits SET content = ?, updated_at = ? WHERE id = ?`, [candidate.content, timestamp, storyPitId]);
+      } else {
+        const created = this.insertStoryPit({
+          projectId: chapter.project_id,
+          type: 'chapter',
+          originChapterId: chapter.id,
+          creationMethod: 'manual',
+          content: candidate.content,
+          note: null
+        });
+        storyPitId = created.id;
+      }
+    } else if (storyPitId) {
+      this.run(`DELETE FROM story_pits WHERE id = ?`, [storyPitId]);
+      storyPitId = null;
+    }
+
+    this.run(
+      `UPDATE chapter_pit_candidates
+       SET status = ?, story_pit_id = ?, updated_at = ?
+       WHERE id = ?`,
+      [status, storyPitId, timestamp, candidate.id]
+    );
+    this.persist();
+    return this.getPitCandidateOrThrow(candidate.id);
+  }
+
   public createChapterPit(input: ChapterCreatePitInput): StoryPitView {
     const chapter = this.getChapterOrThrow(input.chapterId);
 
@@ -1297,11 +1640,11 @@ export class AppDatabase {
       for (const content of candidates) {
         const timestamp = nowIso();
         this.run(
-          `INSERT INTO story_pits (
+           `INSERT INTO story_pits (
              id, project_id, type, origin_chapter_id, creation_method, content, status,
-             resolved_in_chapter_id, sort_order, note, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [randomUUID(), chapter.project_id, 'chapter', chapter.id, 'ai', content, 'open', null, null, null, timestamp, timestamp]
+             progress_status, resolved_in_chapter_id, sort_order, note, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), chapter.project_id, 'chapter', chapter.id, 'ai', content, 'open', 'unaddressed', null, null, null, timestamp, timestamp]
         );
       }
       this.run('COMMIT');
@@ -1320,7 +1663,7 @@ export class AppDatabase {
     this.validatePitResolvableForChapter(chapter, pit);
     this.run(
       `UPDATE story_pits
-       SET status = 'resolved', resolved_in_chapter_id = ?, updated_at = ?
+       SET status = 'resolved', progress_status = 'resolved', resolved_in_chapter_id = ?, updated_at = ?
        WHERE id = ?`,
       [chapter.id, nowIso(), pit.id]
     );
@@ -1337,7 +1680,7 @@ export class AppDatabase {
 
     this.run(
       `UPDATE story_pits
-       SET status = 'open', resolved_in_chapter_id = NULL, updated_at = ?
+       SET status = 'open', progress_status = 'unaddressed', resolved_in_chapter_id = NULL, updated_at = ?
        WHERE id = ?`,
       [nowIso(), pit.id]
     );
@@ -1736,6 +2079,7 @@ export class AppDatabase {
   private getChapterOrThrow(chapterId: string): Chapter {
     const row = this.queryOne<ChapterRow>(
       `SELECT id, project_id, index_no, title, status, pits_enabled, goal, outline_ai, outline_user,
+              planning_clues_json, foreshadow_notes_json,
               content, next_hook, word_count, revision, confirmed_fields_json, created_at, updated_at, source
        FROM chapters
        WHERE id = ?`,
@@ -1846,6 +2190,7 @@ export class AppDatabase {
          p.creation_method,
          p.content,
          p.status,
+         p.progress_status,
          p.resolved_in_chapter_id,
          p.sort_order,
          p.note,
@@ -1860,10 +2205,10 @@ export class AppDatabase {
        LEFT JOIN chapters rc ON rc.id = p.resolved_in_chapter_id
        WHERE ${whereClause}
        ORDER BY
-         CASE p.status WHEN 'open' THEN 0 ELSE 1 END,
-         CASE WHEN oc.index_no IS NULL THEN 999999 ELSE oc.index_no END ASC,
-         p.created_at ASC,
-         p.updated_at DESC`,
+          CASE p.progress_status WHEN 'unaddressed' THEN 0 WHEN 'partial' THEN 1 WHEN 'clear' THEN 2 ELSE 3 END,
+          CASE WHEN oc.index_no IS NULL THEN 999999 ELSE oc.index_no END ASC,
+          p.created_at ASC,
+          p.updated_at DESC`,
       params
     );
 
@@ -1883,8 +2228,8 @@ export class AppDatabase {
     this.run(
       `INSERT INTO story_pits (
          id, project_id, type, origin_chapter_id, creation_method, content, status,
-         resolved_in_chapter_id, sort_order, note, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         progress_status, resolved_in_chapter_id, sort_order, note, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         pitId,
         input.projectId,
@@ -1893,6 +2238,7 @@ export class AppDatabase {
         input.creationMethod,
         input.content,
         'open',
+        'unaddressed',
         null,
         null,
         input.note ?? null,
@@ -2003,6 +2349,7 @@ export class AppDatabase {
          p.creation_method,
          p.content,
          p.status,
+         p.progress_status,
          p.resolved_in_chapter_id,
          p.sort_order,
          p.note,
@@ -2028,6 +2375,19 @@ export class AppDatabase {
 
   private getStoryPitViewOrThrow(pitId: string): StoryPitView {
     return this.getStoryPitOrThrow(pitId);
+  }
+
+  private getPitCandidateOrThrow(candidateId: string): ChapterPitCandidate {
+    const row = this.queryOne<ChapterPitCandidateRow>(
+      `SELECT id, chapter_id, content, status, story_pit_id, created_at, updated_at
+       FROM chapter_pit_candidates
+       WHERE id = ?`,
+      [candidateId]
+    );
+    if (!row) {
+      throw new AppError('NOT_FOUND', 'Pit candidate not found');
+    }
+    return mapChapterPitCandidate(row);
   }
 
   private validatePitResolvableForChapter(chapter: Chapter, pit: StoryPitView): void {
@@ -2082,6 +2442,8 @@ export class AppDatabase {
         goal TEXT NOT NULL DEFAULT '',
         outline_ai TEXT NOT NULL DEFAULT '',
         outline_user TEXT NOT NULL DEFAULT '',
+        planning_clues_json TEXT NOT NULL DEFAULT '[]',
+        foreshadow_notes_json TEXT NOT NULL DEFAULT '[]',
         content TEXT NOT NULL DEFAULT '',
         next_hook TEXT NOT NULL DEFAULT '',
         word_count INTEGER NOT NULL DEFAULT 0,
@@ -2172,6 +2534,7 @@ export class AppDatabase {
         creation_method TEXT NOT NULL,
         content TEXT NOT NULL,
         status TEXT NOT NULL,
+        progress_status TEXT NOT NULL DEFAULT 'unaddressed',
         resolved_in_chapter_id TEXT DEFAULT NULL,
         sort_order INTEGER DEFAULT NULL,
         note TEXT DEFAULT NULL,
@@ -2180,6 +2543,40 @@ export class AppDatabase {
         FOREIGN KEY(project_id) REFERENCES novel_projects(id) ON DELETE CASCADE,
         FOREIGN KEY(origin_chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
         FOREIGN KEY(resolved_in_chapter_id) REFERENCES chapters(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_pit_plans (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT NOT NULL,
+        pit_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(pit_id) REFERENCES story_pits(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_pit_reviews (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT NOT NULL,
+        pit_id TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        note TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(pit_id) REFERENCES story_pits(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_pit_candidates (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        story_pit_id TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+        FOREIGN KEY(story_pit_id) REFERENCES story_pits(id) ON DELETE SET NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, index_no);
@@ -2193,10 +2590,16 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_story_pits_project ON story_pits(project_id, status, updated_at);
       CREATE INDEX IF NOT EXISTS idx_story_pits_origin ON story_pits(origin_chapter_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_story_pits_resolved ON story_pits(resolved_in_chapter_id, updated_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_chapter_pit_plans_pair ON chapter_pit_plans(chapter_id, pit_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_pit_plans_chapter ON chapter_pit_plans(chapter_id, created_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_chapter_pit_reviews_pair ON chapter_pit_reviews(chapter_id, pit_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_pit_reviews_chapter ON chapter_pit_reviews(chapter_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_chapter_pit_candidates_chapter ON chapter_pit_candidates(chapter_id, updated_at);
     `);
 
     this.ensureChapterColumns();
     this.ensureSuggestionColumns();
+    this.ensurePitWorkflowSchema();
 
     const row = this.queryOne<{ value: unknown }>("SELECT value FROM app_meta WHERE key = 'schema_version'");
     if (!row) {
@@ -2221,11 +2624,39 @@ export class AppDatabase {
     }
   }
 
+  private ensurePitWorkflowSchema(): void {
+    const pitColumns = this.queryAll<{ name: unknown }>('PRAGMA table_info(story_pits)');
+    const pitNames = new Set(pitColumns.map((item) => String(item.name)));
+    if (!pitNames.has('progress_status')) {
+      this.run(`ALTER TABLE story_pits ADD COLUMN progress_status TEXT NOT NULL DEFAULT 'unaddressed'`);
+      this.run(
+        `UPDATE story_pits
+         SET progress_status = CASE status
+           WHEN 'resolved' THEN 'resolved'
+           ELSE 'unaddressed'
+         END
+         WHERE progress_status IS NULL OR progress_status = ''`
+      );
+    }
+
+    const candidateColumns = this.queryAll<{ name: unknown }>('PRAGMA table_info(chapter_pit_candidates)');
+    const candidateNames = new Set(candidateColumns.map((item) => String(item.name)));
+    if (candidateColumns.length > 0 && !candidateNames.has('story_pit_id')) {
+      this.run(`ALTER TABLE chapter_pit_candidates ADD COLUMN story_pit_id TEXT DEFAULT NULL`);
+    }
+  }
+
   private ensureChapterColumns(): void {
     const columns = this.queryAll<{ name: unknown }>('PRAGMA table_info(chapters)');
     const names = new Set(columns.map((item) => String(item.name)));
     if (!names.has('pits_enabled')) {
       this.run(`ALTER TABLE chapters ADD COLUMN pits_enabled INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!names.has('planning_clues_json')) {
+      this.run(`ALTER TABLE chapters ADD COLUMN planning_clues_json TEXT NOT NULL DEFAULT '[]'`);
+    }
+    if (!names.has('foreshadow_notes_json')) {
+      this.run(`ALTER TABLE chapters ADD COLUMN foreshadow_notes_json TEXT NOT NULL DEFAULT '[]'`);
     }
   }
 

@@ -3,26 +3,40 @@ import type {
   AiExtractOutlineResult,
   AiGenerateChapterFieldInput,
   AiGenerateChapterFieldResult,
+  AiReviewChapterPitCandidatesInput,
+  AiReviewChapterPitCandidatesResult,
+  AiReviewChapterPitResponsesInput,
+  AiReviewChapterPitResponsesResult,
   AiSuggestion,
   AppInitData,
   AutosaveIntervalSeconds,
   Chapter,
   ChapterApplyGeneratedPitsInput,
   ChapterAutoPickContextRefsInput,
+  ChapterClearPitReviewInput,
   ChapterContextRefAddInput,
   ChapterContextRefRemoveInput,
   ChapterContextRefUpdateInput,
   ChapterContextRefView,
   ChapterContextRefsGetInput,
   ChapterCreateInput,
+  ChapterCreatePitCandidateManualInput,
   ChapterCreatePitFromSuggestionInput,
   ChapterCreatePitManualInput,
   ChapterCreatePitInput,
+  ChapterDeletePitCandidateInput,
   ChapterDeleteInput,
   ChapterGeneratePitsFromContentInput,
   ChapterGeneratePitsFromContentResult,
   ChapterGetPitSuggestionsInput,
+  ChapterListPitCandidatesInput,
+  ChapterListPitReviewsInput,
+  ChapterListPlannedPitsInput,
   ChapterPitSuggestionsResult,
+  ChapterPitCandidate,
+  ChapterPitPlanView,
+  ChapterPitReviewView,
+  ChapterPlanPitResponseInput,
   ChapterListCreatedPitsInput,
   ChapterListOutlinesByProjectInput,
   ChapterListResolvedPitsInput,
@@ -30,8 +44,12 @@ import type {
   ChapterRefs,
   ChapterRefsGetInput,
   ChapterRefsUpdateInput,
+  ChapterReviewPitCandidateInput,
+  ChapterReviewPitResponseInput,
   ChapterResolvePitInput,
+  ChapterUnplanPitResponseInput,
   ChapterUnresolvePitInput,
+  ChapterUpdatePitCandidateInput,
   ChapterUpdateInput,
   Character,
   CharacterCreateInput,
@@ -90,6 +108,17 @@ export type AppApi = {
     listOutlinesByProject: (input: ChapterListOutlinesByProjectInput) => Promise<IpcResult<ChapterOutlineOverviewItem[]>>;
     listCreatedPits: (input: ChapterListCreatedPitsInput) => Promise<IpcResult<StoryPitView[]>>;
     listResolvedPits: (input: ChapterListResolvedPitsInput) => Promise<IpcResult<StoryPitView[]>>;
+    listPlannedPits: (input: ChapterListPlannedPitsInput) => Promise<IpcResult<ChapterPitPlanView[]>>;
+    planPitResponse: (input: ChapterPlanPitResponseInput) => Promise<IpcResult<ChapterPitPlanView[]>>;
+    unplanPitResponse: (input: ChapterUnplanPitResponseInput) => Promise<IpcResult<DeleteResult>>;
+    listPitReviews: (input: ChapterListPitReviewsInput) => Promise<IpcResult<ChapterPitReviewView[]>>;
+    reviewPitResponse: (input: ChapterReviewPitResponseInput) => Promise<IpcResult<ChapterPitReviewView>>;
+    clearPitReview: (input: ChapterClearPitReviewInput) => Promise<IpcResult<DeleteResult>>;
+    listPitCandidates: (input: ChapterListPitCandidatesInput) => Promise<IpcResult<ChapterPitCandidate[]>>;
+    createPitCandidateManual: (input: ChapterCreatePitCandidateManualInput) => Promise<IpcResult<ChapterPitCandidate>>;
+    updatePitCandidate: (input: ChapterUpdatePitCandidateInput) => Promise<IpcResult<ChapterPitCandidate>>;
+    deletePitCandidate: (input: ChapterDeletePitCandidateInput) => Promise<IpcResult<DeleteResult>>;
+    reviewPitCandidate: (input: ChapterReviewPitCandidateInput) => Promise<IpcResult<ChapterPitCandidate>>;
     getPitSuggestions: (input: ChapterGetPitSuggestionsInput) => Promise<IpcResult<ChapterPitSuggestionsResult>>;
     createPitFromSuggestion: (input: ChapterCreatePitFromSuggestionInput) => Promise<IpcResult<StoryPitView>>;
     createPitManual: (input: ChapterCreatePitManualInput) => Promise<IpcResult<StoryPitView>>;
@@ -105,6 +134,9 @@ export type AppApi = {
     extractOutline: (input: AiExtractOutlineInput) => Promise<IpcResult<AiExtractOutlineResult>>;
     generateChapterTitle: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
     generateChapterGoal: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
+    generateChapterNextHook: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
+    reviewChapterPitResponses: (input: AiReviewChapterPitResponsesInput) => Promise<IpcResult<AiReviewChapterPitResponsesResult>>;
+    reviewChapterPitCandidates: (input: AiReviewChapterPitCandidatesInput) => Promise<IpcResult<AiReviewChapterPitCandidatesResult>>;
   };
   pit: {
     listByProject: (input: PitListByProjectInput) => Promise<IpcResult<StoryPitView[]>>;
