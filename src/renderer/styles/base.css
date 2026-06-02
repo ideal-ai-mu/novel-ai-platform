@@ -1,0 +1,123 @@
+﻿@import url('https://fonts.googleapis.com/css2?family=Newsreader:wght@600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap');
+
+:root {
+  color-scheme: dark;
+  --font-sans: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  --font-display: "Newsreader", "Noto Serif SC", serif;
+  font-family: var(--font-sans);
+  --workbench-standard-font-size: 14px;
+  background: #0b0a0a;
+  color: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at top, rgba(249, 115, 22, 0.14), transparent 24%),
+    linear-gradient(180deg, #121010 0%, #090808 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  outline: none;
+}
+
+button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f8fafc;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+}
+
+textarea {
+  resize: vertical;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.app-screen-state {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  background: #0a0909;
+}
+
+.app-screen-card {
+  width: min(520px, calc(100% - 48px));
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  background: rgba(18, 16, 16, 0.94);
+}
+
+.app-screen-hint {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.app-screen-card h2,
+.home-sidebar-header h2,
+.home-page-eyebrow,
+.chapters-breadcrumb h2,
+.writer-bookline,
+.modal-header h3,
+.home-empty-hero h3,
+.home-empty-state h3 {
+  margin: 0;
+}
+

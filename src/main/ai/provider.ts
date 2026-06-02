@@ -118,6 +118,18 @@ export type AiTextResult = {
   text: string;
 };
 
+export type ChatPromptMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+export type ChatPromptPayload = {
+  systemPrompt: string;
+  messages: ChatPromptMessage[];
+  referenceText: string;
+  model?: string;
+};
+
 export interface AiProvider {
   readonly name: string;
   summarizeChapterFromContent(payload: PromptPayload): Promise<AiTextResult>;
@@ -129,5 +141,6 @@ export interface AiProvider {
   reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult>;
   proposeOutlineUpdate(payload: PromptPayload): Promise<AiTextResult>;
   generateChapterSuggestions(payload: PromptPayload): Promise<AiTextResult>;
+  chat(payload: ChatPromptPayload): Promise<AiTextResult>;
 }
 

@@ -1,0 +1,77 @@
+﻿@media (max-width: 1120px) {
+  .home-shell {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .home-project-strip,
+  .writer-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .home-work-cover {
+    width: 96px;
+    height: 132px;
+  }
+}
+
+@media (max-width: 860px) {
+  .home-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .home-sidebar {
+    grid-template-rows: auto auto;
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .home-main {
+    padding: 22px 18px 18px;
+  }
+
+  .home-topbar,
+  .chapters-nav-row,
+  .chapters-header,
+  .chapters-toolbar,
+  .writer-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .home-project-strip-actions,
+  .chapters-header-actions,
+  .chapter-row-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
+
+  .home-project-strip {
+    gap: 16px;
+  }
+
+  .chapters-table-head {
+    display: none;
+  }
+
+  .chapter-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    min-height: auto;
+    padding: 16px 0;
+  }
+
+  .chapter-row-actions {
+    justify-content: flex-start;
+  }
+
+  .chapters-search-wrap {
+    width: 100%;
+  }
+
+  .chapters-breadcrumb {
+    gap: 10px;
+  }
+}
+

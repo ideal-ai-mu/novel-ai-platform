@@ -1,6 +1,7 @@
-﻿import { AppError } from '../db/database';
+﻿import { AppError } from '../db/errors';
+import { getAiProviderConfigForModel } from './ai-config';
 import { MockAiProvider } from './mock-provider';
-import type { AiProvider, AiTextResult, PromptPayload } from './provider';
+import type { AiProvider, AiTextResult, ChatPromptPayload, PromptPayload } from './provider';
 import { RealAiProvider } from './real-provider';
 
 function createProvider(): AiProvider {
@@ -12,6 +13,8 @@ function createProvider(): AiProvider {
 }
 
 export class AIService {
+  private readonly realProvider = new RealAiProvider();
+
   constructor(private readonly provider: AiProvider) {}
 
   private async ensureTextResult(operation: string, action: Promise<AiTextResult>): Promise<AiTextResult> {
@@ -62,6 +65,13 @@ export class AIService {
   public generateChapterSuggestions(payload: PromptPayload): Promise<AiTextResult> {
     return this.ensureTextResult('generateChapterSuggestions', this.provider.generateChapterSuggestions(payload));
   }
+
+  public chat(payload: ChatPromptPayload): Promise<AiTextResult> {
+    const config = getAiProviderConfigForModel(payload.model);
+    const provider = config.apiKey.trim() || process.env.OPENAI_API_KEY?.trim() ? this.realProvider : this.provider;
+    return this.ensureTextResult('chat', provider.chat(payload));
+  }
 }
 
 export const aiService = new AIService(createProvider());
+

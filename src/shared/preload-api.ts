@@ -3,12 +3,23 @@ import type {
   AiExtractOutlineResult,
   AiGenerateChapterFieldInput,
   AiGenerateChapterFieldResult,
+  AiChatInput,
+  AiChatResult,
+  AiProviderConfig,
+  AiProviderConfigDeleteInput,
+  AiProviderConfigState,
+  AiProviderListModelsInput,
+  AiProviderListModelsResult,
+  AiProviderConfigUpdateInput,
   AiReviewChapterPitCandidatesInput,
   AiReviewChapterPitCandidatesResult,
   AiReviewChapterPitResponsesInput,
   AiReviewChapterPitResponsesResult,
   AiSuggestion,
   AppInitData,
+  AppMenuActionInput,
+  AppSetAutosaveIntervalInput,
+  AppStorageInfo,
   AutosaveIntervalSeconds,
   Chapter,
   ChapterApplyGeneratedPitsInput,
@@ -26,9 +37,11 @@ import type {
   ChapterCreatePitInput,
   ChapterDeletePitCandidateInput,
   ChapterDeleteInput,
+  ChapterDeletePermanentInput,
   ChapterGeneratePitsFromContentInput,
   ChapterGeneratePitsFromContentResult,
   ChapterGetPitSuggestionsInput,
+  ChapterListDeletedInput,
   ChapterListPitCandidatesInput,
   ChapterListPitReviewsInput,
   ChapterListPlannedPitsInput,
@@ -41,9 +54,13 @@ import type {
   ChapterListOutlinesByProjectInput,
   ChapterListResolvedPitsInput,
   ChapterOutlineOverviewItem,
+  ChapterRelationshipGraph,
+  ChapterRelationshipGraphGetInput,
+  ChapterRelationshipGraphUpdateInput,
   ChapterRefs,
   ChapterRefsGetInput,
   ChapterRefsUpdateInput,
+  ChapterRestoreInput,
   ChapterReviewPitCandidateInput,
   ChapterReviewPitResponseInput,
   ChapterResolvePitInput,
@@ -54,6 +71,9 @@ import type {
   Character,
   CharacterCreateInput,
   CharacterDeleteInput,
+  CharacterRelationshipListInput,
+  CharacterRelationshipUpsertInput,
+  CharacterRelationshipView,
   CharacterUpdateInput,
   DeleteResult,
   IpcResult,
@@ -72,34 +92,57 @@ import type {
   ProjectCreateInput,
   ProjectDeleteInput,
   ProjectGetInput,
+  ProjectRestoreInput,
+  ProjectUpdateInput,
   StoryPitView,
   SuggestionApplyInput,
   SuggestionApplyResult,
   SuggestionCreateMockInput,
   SuggestionListByEntityInput,
   SuggestionRejectInput,
-  SuggestionRejectResult
+  SuggestionRejectResult,
+  TimelineEventReplaceChapterInput,
+  TimelineEventListByProjectInput,
+  TimelineEventView,
+  TimelineLayerData,
+  TimelineLayerListByProjectInput,
+  TimelineLayerReplaceChapterInput
 } from './ipc';
 
 export type AppApi = {
   app: {
     init: () => Promise<IpcResult<AppInitData>>;
     onAutosaveIntervalChanged: (listener: (seconds: AutosaveIntervalSeconds) => void) => () => void;
+    setAutosaveInterval: (input: AppSetAutosaveIntervalInput) => Promise<IpcResult<AutosaveIntervalSeconds>>;
+    menuAction: (input: AppMenuActionInput) => Promise<IpcResult<void>>;
+    getStorageInfo: () => Promise<IpcResult<AppStorageInfo>>;
+    changeDataLocation: () => Promise<IpcResult<void>>;
+    openDataLocation: () => Promise<IpcResult<void>>;
+    restoreDefaultLocation: () => Promise<IpcResult<void>>;
   };
   project: {
     list: () => Promise<IpcResult<NovelProject[]>>;
+    listDeleted: () => Promise<IpcResult<NovelProject[]>>;
     create: (input: ProjectCreateInput) => Promise<IpcResult<NovelProject>>;
     get: (input: ProjectGetInput) => Promise<IpcResult<NovelProject>>;
+    update: (input: ProjectUpdateInput) => Promise<IpcResult<NovelProject>>;
     delete: (input: ProjectDeleteInput) => Promise<IpcResult<DeleteResult>>;
+    restore: (input: ProjectRestoreInput) => Promise<IpcResult<DeleteResult>>;
+    deletePermanent: (input: ProjectDeleteInput) => Promise<IpcResult<DeleteResult>>;
   };
   chapter: {
     list: (projectId: string) => Promise<IpcResult<Chapter[]>>;
+    listDeleted: (input: ChapterListDeletedInput) => Promise<IpcResult<Chapter[]>>;
     create: (input: ChapterCreateInput) => Promise<IpcResult<Chapter>>;
     get: (chapterId: string) => Promise<IpcResult<Chapter>>;
     update: (input: ChapterUpdateInput) => Promise<IpcResult<Chapter>>;
     delete: (input: ChapterDeleteInput) => Promise<IpcResult<DeleteResult>>;
+    restore: (input: ChapterRestoreInput) => Promise<IpcResult<DeleteResult>>;
+    deletePermanent: (input: ChapterDeletePermanentInput) => Promise<IpcResult<DeleteResult>>;
     getRefs: (input: ChapterRefsGetInput) => Promise<IpcResult<ChapterRefs>>;
     updateRefs: (input: ChapterRefsUpdateInput) => Promise<IpcResult<ChapterRefs>>;
+    getRelationshipGraph: (input: ChapterRelationshipGraphGetInput) => Promise<IpcResult<ChapterRelationshipGraph>>;
+    updateRelationshipGraph: (input: ChapterRelationshipGraphUpdateInput) => Promise<IpcResult<ChapterRelationshipGraph>>;
     getContextRefs: (input: ChapterContextRefsGetInput) => Promise<IpcResult<ChapterContextRefView[]>>;
     addContextRef: (input: ChapterContextRefAddInput) => Promise<IpcResult<ChapterContextRefView[]>>;
     removeContextRef: (input: ChapterContextRefRemoveInput) => Promise<IpcResult<DeleteResult>>;
@@ -137,6 +180,11 @@ export type AppApi = {
     generateChapterNextHook: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
     reviewChapterPitResponses: (input: AiReviewChapterPitResponsesInput) => Promise<IpcResult<AiReviewChapterPitResponsesResult>>;
     reviewChapterPitCandidates: (input: AiReviewChapterPitCandidatesInput) => Promise<IpcResult<AiReviewChapterPitCandidatesResult>>;
+    chat: (input: AiChatInput) => Promise<IpcResult<AiChatResult>>;
+    getConfig: () => Promise<IpcResult<AiProviderConfigState>>;
+    updateConfig: (input: AiProviderConfigUpdateInput) => Promise<IpcResult<AiProviderConfigState>>;
+    deleteConfig: (input: AiProviderConfigDeleteInput) => Promise<IpcResult<AiProviderConfigState>>;
+    listModels: (input: AiProviderListModelsInput) => Promise<IpcResult<AiProviderListModelsResult>>;
   };
   pit: {
     listByProject: (input: PitListByProjectInput) => Promise<IpcResult<StoryPitView[]>>;
@@ -152,6 +200,14 @@ export type AppApi = {
     get: (characterId: string) => Promise<IpcResult<Character>>;
     update: (input: CharacterUpdateInput) => Promise<IpcResult<Character>>;
     delete: (input: CharacterDeleteInput) => Promise<IpcResult<DeleteResult>>;
+    listRelationships: (input: CharacterRelationshipListInput) => Promise<IpcResult<CharacterRelationshipView[]>>;
+    upsertRelationship: (input: CharacterRelationshipUpsertInput) => Promise<IpcResult<CharacterRelationshipView[]>>;
+  };
+  timeline: {
+    listEventsByProject: (input: TimelineEventListByProjectInput) => Promise<IpcResult<TimelineEventView[]>>;
+    replaceChapterEvents: (input: TimelineEventReplaceChapterInput) => Promise<IpcResult<TimelineEventView[]>>;
+    listLayersByProject: (input: TimelineLayerListByProjectInput) => Promise<IpcResult<TimelineLayerData>>;
+    replaceChapterLayers: (input: TimelineLayerReplaceChapterInput) => Promise<IpcResult<TimelineLayerData>>;
   };
   lore: {
     list: (projectId: string) => Promise<IpcResult<LoreEntry[]>>;

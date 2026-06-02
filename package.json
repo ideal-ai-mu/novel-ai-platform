@@ -1,8 +1,13 @@
 {
   "name": "novel-ai-platform",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Novel AI Studio - Windows desktop app shell",
+  "author": "ideal-ai-mu",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ideal-ai-mu/novel-ai-platform.git"
+  },
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron:build\" \"npm:dev:electron:run\"",
@@ -14,9 +19,12 @@
     "build:electron": "tsc -p tsconfig.main.json",
     "prestart": "npm run build",
     "start": "cmd /c \"set ELECTRON_RUN_AS_NODE=&& electron .\"",
-    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "dist": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --win --dir"
   },
   "dependencies": {
+    "lucide-react": "^1.11.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sql.js": "^1.13.0"
@@ -30,8 +38,44 @@
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
     "electron": "^34.2.0",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.8.2",
     "vite": "^6.2.0",
     "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.idealaimu.novel-ai-platform",
+    "productName": "Novel AI Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Novel-AI-Studio-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ideal-ai-mu",
+        "repo": "novel-ai-platform"
+      }
+    ]
   }
 }

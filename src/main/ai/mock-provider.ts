@@ -1,5 +1,7 @@
 ﻿import type { AiProvider, AiTextResult, PromptPayload } from './provider';
 
+import type { ChatPromptPayload } from './provider';
+
 function normalizeText(value: string): string {
   return value.replace(/\r\n/g, '\n').replace(/\s+/gu, ' ').trim();
 }
@@ -219,6 +221,15 @@ export class MockAiProvider implements AiProvider {
 
   public async generateChapterSuggestions(_payload: PromptPayload): Promise<AiTextResult> {
     throw new Error('generateChapterSuggestions is not implemented in the mock provider yet');
+  }
+
+  public async chat(payload: ChatPromptPayload): Promise<AiTextResult> {
+    const lastUserMessage = [...payload.messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+    const referenceHint = payload.referenceText ? `\n\n我已经带入了这些上下文：${compactText(payload.referenceText, 180)}` : '';
+    const text = lastUserMessage
+      ? `我会围绕“${compactText(lastUserMessage, 80)}”来处理。你可以继续追问，也可以要求我改写、扩写、分析人物动机或检查章节逻辑。${referenceHint}`
+      : `这是一个新的对话。你可以问我剧情推进、人物对白、设定一致性或章节复盘。${referenceHint}`;
+    return { provider: this.name, model: payload.model || 'mock-chat-v1', text };
   }
 }
 
