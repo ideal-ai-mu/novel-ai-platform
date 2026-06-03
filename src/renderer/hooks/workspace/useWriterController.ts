@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { AutosaveIntervalSeconds, Chapter, NovelProject } from '../../../shared/ipc';
 import type { ChapterEditorState, WriterMode } from '../../types';
-import type { WriterPageProps } from '../../pages/WriterPage';
 
 type UseWriterControllerArgs = {
   activeProject: NovelProject | null;
@@ -66,28 +65,9 @@ export function useWriterController({
     setWriterMode('edit');
   }, []);
 
-  const writerPageProps: WriterPageProps = {
-    activeProject,
-    currentChapter,
-    currentChapterDisplayNumber,
-    editor,
-    liveWordCount,
-    writerMode,
-    writerBackTarget: 'home',
-    autosaveIntervalSeconds: 10,
-    saveStatusText,
-    autosaveLabel,
-    onBack: handleWriterBack,
-    onEnterEditMode: handleEnterEditMode,
-    onTitleChange: handleWriterTitleChange,
-    onContentChange: handleWriterContentChange,
-    onBlurSave: handleWriterBlurSave
-  };
-
   return {
     writerMode,
     openWriter,
-    writerPageProps,
     handleWriterBack,
     handleEnterEditMode,
     handleWriterTitleChange,

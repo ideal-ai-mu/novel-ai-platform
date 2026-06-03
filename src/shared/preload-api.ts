@@ -143,43 +143,11 @@ export type AppApi = {
     updateRefs: (input: ChapterRefsUpdateInput) => Promise<IpcResult<ChapterRefs>>;
     getRelationshipGraph: (input: ChapterRelationshipGraphGetInput) => Promise<IpcResult<ChapterRelationshipGraph>>;
     updateRelationshipGraph: (input: ChapterRelationshipGraphUpdateInput) => Promise<IpcResult<ChapterRelationshipGraph>>;
-    getContextRefs: (input: ChapterContextRefsGetInput) => Promise<IpcResult<ChapterContextRefView[]>>;
-    addContextRef: (input: ChapterContextRefAddInput) => Promise<IpcResult<ChapterContextRefView[]>>;
-    removeContextRef: (input: ChapterContextRefRemoveInput) => Promise<IpcResult<DeleteResult>>;
-    updateContextRef: (input: ChapterContextRefUpdateInput) => Promise<IpcResult<ChapterContextRefView[]>>;
-    autoPickContextRefs: (input: ChapterAutoPickContextRefsInput) => Promise<IpcResult<ChapterContextRefView[]>>;
-    listOutlinesByProject: (input: ChapterListOutlinesByProjectInput) => Promise<IpcResult<ChapterOutlineOverviewItem[]>>;
-    listCreatedPits: (input: ChapterListCreatedPitsInput) => Promise<IpcResult<StoryPitView[]>>;
-    listResolvedPits: (input: ChapterListResolvedPitsInput) => Promise<IpcResult<StoryPitView[]>>;
-    listPlannedPits: (input: ChapterListPlannedPitsInput) => Promise<IpcResult<ChapterPitPlanView[]>>;
-    planPitResponse: (input: ChapterPlanPitResponseInput) => Promise<IpcResult<ChapterPitPlanView[]>>;
-    unplanPitResponse: (input: ChapterUnplanPitResponseInput) => Promise<IpcResult<DeleteResult>>;
-    listPitReviews: (input: ChapterListPitReviewsInput) => Promise<IpcResult<ChapterPitReviewView[]>>;
     reviewPitResponse: (input: ChapterReviewPitResponseInput) => Promise<IpcResult<ChapterPitReviewView>>;
-    clearPitReview: (input: ChapterClearPitReviewInput) => Promise<IpcResult<DeleteResult>>;
-    listPitCandidates: (input: ChapterListPitCandidatesInput) => Promise<IpcResult<ChapterPitCandidate[]>>;
-    createPitCandidateManual: (input: ChapterCreatePitCandidateManualInput) => Promise<IpcResult<ChapterPitCandidate>>;
-    updatePitCandidate: (input: ChapterUpdatePitCandidateInput) => Promise<IpcResult<ChapterPitCandidate>>;
-    deletePitCandidate: (input: ChapterDeletePitCandidateInput) => Promise<IpcResult<DeleteResult>>;
-    reviewPitCandidate: (input: ChapterReviewPitCandidateInput) => Promise<IpcResult<ChapterPitCandidate>>;
     getPitSuggestions: (input: ChapterGetPitSuggestionsInput) => Promise<IpcResult<ChapterPitSuggestionsResult>>;
     createPitFromSuggestion: (input: ChapterCreatePitFromSuggestionInput) => Promise<IpcResult<StoryPitView>>;
-    createPitManual: (input: ChapterCreatePitManualInput) => Promise<IpcResult<StoryPitView>>;
-    createPit: (input: ChapterCreatePitInput) => Promise<IpcResult<StoryPitView>>;
-    generatePitsFromContent: (
-      input: ChapterGeneratePitsFromContentInput
-    ) => Promise<IpcResult<ChapterGeneratePitsFromContentResult>>;
-    applyGeneratedPits: (input: ChapterApplyGeneratedPitsInput) => Promise<IpcResult<StoryPitView[]>>;
-    resolvePit: (input: ChapterResolvePitInput) => Promise<IpcResult<StoryPitView>>;
-    unresolvePit: (input: ChapterUnresolvePitInput) => Promise<IpcResult<StoryPitView>>;
   };
   ai: {
-    extractOutline: (input: AiExtractOutlineInput) => Promise<IpcResult<AiExtractOutlineResult>>;
-    generateChapterTitle: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
-    generateChapterGoal: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
-    generateChapterNextHook: (input: AiGenerateChapterFieldInput) => Promise<IpcResult<AiGenerateChapterFieldResult>>;
-    reviewChapterPitResponses: (input: AiReviewChapterPitResponsesInput) => Promise<IpcResult<AiReviewChapterPitResponsesResult>>;
-    reviewChapterPitCandidates: (input: AiReviewChapterPitCandidatesInput) => Promise<IpcResult<AiReviewChapterPitCandidatesResult>>;
     chat: (input: AiChatInput) => Promise<IpcResult<AiChatResult>>;
     getConfig: () => Promise<IpcResult<AiProviderConfigState>>;
     updateConfig: (input: AiProviderConfigUpdateInput) => Promise<IpcResult<AiProviderConfigState>>;
@@ -188,8 +156,6 @@ export type AppApi = {
   };
   pit: {
     listByProject: (input: PitListByProjectInput) => Promise<IpcResult<StoryPitView[]>>;
-    listGroupedByProject: (input: PitListGroupedByProjectInput) => Promise<IpcResult<PitGroupedByProjectResult>>;
-    listAvailableForChapter: (input: PitListAvailableForChapterInput) => Promise<IpcResult<StoryPitView[]>>;
     createManual: (input: PitCreateManualInput) => Promise<IpcResult<StoryPitView>>;
     update: (input: PitUpdateInput) => Promise<IpcResult<StoryPitView>>;
     delete: (input: PitDeleteInput) => Promise<IpcResult<DeleteResult>>;
@@ -204,7 +170,6 @@ export type AppApi = {
     upsertRelationship: (input: CharacterRelationshipUpsertInput) => Promise<IpcResult<CharacterRelationshipView[]>>;
   };
   timeline: {
-    listEventsByProject: (input: TimelineEventListByProjectInput) => Promise<IpcResult<TimelineEventView[]>>;
     replaceChapterEvents: (input: TimelineEventReplaceChapterInput) => Promise<IpcResult<TimelineEventView[]>>;
     listLayersByProject: (input: TimelineLayerListByProjectInput) => Promise<IpcResult<TimelineLayerData>>;
     replaceChapterLayers: (input: TimelineLayerReplaceChapterInput) => Promise<IpcResult<TimelineLayerData>>;

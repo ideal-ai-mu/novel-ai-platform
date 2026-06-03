@@ -102,60 +102,6 @@ export function registerChapterIpc(): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_CONTEXT_REFS_GET,
-    async (_event, input: Shared.ChapterContextRefsGetInput): Promise<Shared.IpcResult<Shared.ChapterContextRefView[]>> =>
-      withIpcResult(async () => {
-        await ensureDatabaseReady();
-        return appDatabase.getChapterContextRefs(input);
-      })
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_CONTEXT_REF_ADD,
-    async (_event, input: Shared.ChapterContextRefAddInput): Promise<Shared.IpcResult<Shared.ChapterContextRefView[]>> =>
-      withIpcResult(async () => {
-        await ensureDatabaseReady();
-        return appDatabase.addChapterContextRef(input);
-      })
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_CONTEXT_REF_REMOVE,
-    async (_event, input: Shared.ChapterContextRefRemoveInput): Promise<Shared.IpcResult<Shared.DeleteResult>> =>
-      withIpcResult(async () => {
-        await ensureDatabaseReady();
-        return appDatabase.removeChapterContextRef(input);
-      })
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_CONTEXT_REF_UPDATE,
-    async (_event, input: Shared.ChapterContextRefUpdateInput): Promise<Shared.IpcResult<Shared.ChapterContextRefView[]>> =>
-      withIpcResult(async () => {
-        await ensureDatabaseReady();
-        return appDatabase.updateChapterContextRef(input);
-      })
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_CONTEXT_REFS_AUTO_PICK,
-    async (_event, input: Shared.ChapterAutoPickContextRefsInput): Promise<Shared.IpcResult<Shared.ChapterContextRefView[]>> =>
-      withIpcResult(async () => {
-        await ensureDatabaseReady();
-        return appDatabase.autoPickChapterContextRefs(input);
-      })
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CHAPTER_LIST_OUTLINES_BY_PROJECT,
-    async (_event, input: Shared.ChapterListOutlinesByProjectInput): Promise<Shared.IpcResult<Shared.ChapterOutlineOverviewItem[]>> =>
-      withIpcResult(async () => {
-        await ensureDatabaseReady();
-        return appDatabase.listChapterOutlinesByProject(input.projectId);
-      })
-  );
-
-  ipcMain.handle(
     IPC_CHANNELS.TIMELINE_EVENT_LIST_BY_PROJECT,
     async (_event, input: Shared.TimelineEventListByProjectInput): Promise<Shared.IpcResult<Shared.TimelineEventView[]>> =>
       withIpcResult(async () => {

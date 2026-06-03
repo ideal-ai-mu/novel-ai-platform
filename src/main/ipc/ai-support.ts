@@ -19,22 +19,6 @@ export type LoadedChapterAiResources = {
   pitCandidates: Shared.ChapterPitCandidate[];
 };
 
-export function hasMeaningfulAiReferenceContext(resources: LoadedChapterAiResources): boolean {
-  return Boolean(
-    resources.chapter.goal.trim() ||
-      resources.chapter.title.trim() ||
-      resources.chapter.outline_user.trim() ||
-      resources.chapter.next_hook.trim() ||
-      resources.chapter.foreshadow_notes_json.length > 0 ||
-      resources.linkedCharacters.length > 0 ||
-      resources.linkedLoreEntries.length > 0 ||
-      resources.referenceChapters.length > 0 ||
-      resources.plannedPits.length > 0 ||
-      resources.pitCandidates.length > 0 ||
-      resources.pitReviews.length > 0
-  );
-}
-
 export function hasMeaningfulSummaryExtractionContext(resources: LoadedChapterAiResources): boolean {
   return Boolean(resources.chapter.content.trim());
 }
@@ -51,10 +35,6 @@ export function hasMeaningfulPitSuggestionContext(resources: LoadedChapterAiReso
       resources.referenceChapters.length > 0 ||
       resources.plannedPits.length > 0
   );
-}
-
-export function normalizeAiFieldCandidate(text: string): string {
-  return text.trim().replace(/^[\s"'“”‘’《》【】]+|[\s"'“”‘’《》【】]+$/gu, '');
 }
 
 function normalizePitCandidate(text: string): string {
@@ -77,89 +57,6 @@ export function parsePitCandidates(text: string): string[] {
 
   const single = normalizePitCandidate(text);
   return single ? [single] : [];
-}
-
-function parseJsonRecord(text: string): Record<string, unknown> {
-  try {
-    const value = JSON.parse(text) as unknown;
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error('AI returned non-object JSON');
-    }
-    return value as Record<string, unknown>;
-  } catch (error) {
-    throw new AppError('AI_OUTPUT_INVALID', error instanceof Error ? error.message : 'AI returned invalid JSON');
-  }
-}
-
-function ensurePitReviewOutcomeValue(value: unknown): Shared.ChapterPitReviewOutcome {
-  return value === 'none' || value === 'partial' || value === 'clear' || value === 'resolved' ? value : 'none';
-}
-
-function ensurePitCandidateStatusValue(value: unknown): Shared.ChapterPitCandidateStatus {
-  return value === 'draft' || value === 'weak' || value === 'confirmed' || value === 'discarded' ? value : 'draft';
-}
-
-export function parseAiPitResponseReviewItems(
-  text: string,
-  plannedPits: Shared.ChapterPitPlanView[]
-): Shared.AiReviewChapterPitResponsesResult['items'] {
-  const json = parseJsonRecord(text);
-  const rawItems = Array.isArray(json.items) ? json.items : [];
-  const plannedByPitId = new Map(plannedPits.map((plan) => [plan.pit.id, plan]));
-
-  const items = rawItems
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => {
-      const pitId = typeof item.pitId === 'string' ? item.pitId : '';
-      if (!plannedByPitId.has(pitId)) {
-        return null;
-      }
-      return {
-        pitId,
-        outcome: ensurePitReviewOutcomeValue(item.outcome),
-        note: typeof item.note === 'string' ? item.note.trim() : ''
-      };
-    })
-    .filter((item): item is Shared.AiReviewChapterPitResponsesResult['items'][number] => item !== null);
-
-  return Array.from(new Map(items.map((item) => [item.pitId, item])).values());
-}
-
-export function parseAiPitCandidateReviewItems(
-  text: string,
-  pitCandidates: Shared.ChapterPitCandidate[]
-): Pick<Shared.AiReviewChapterPitCandidatesResult, 'existingItems' | 'newItems'> {
-  const json = parseJsonRecord(text);
-  const rawExistingItems = Array.isArray(json.existingItems) ? json.existingItems : [];
-  const rawNewItems = Array.isArray(json.newItems) ? json.newItems : [];
-  const candidateById = new Map(pitCandidates.map((candidate) => [candidate.id, candidate]));
-
-  const existingItems = rawExistingItems
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => {
-      const candidateId = typeof item.candidateId === 'string' ? item.candidateId : '';
-      if (!candidateById.has(candidateId)) {
-        return null;
-      }
-      return {
-        candidateId,
-        status: ensurePitCandidateStatusValue(item.status)
-      };
-    })
-    .filter((item): item is Shared.AiReviewChapterPitCandidatesResult['existingItems'][number] => item !== null);
-
-  const newItems = rawNewItems
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => ({
-      content: typeof item.content === 'string' ? normalizePitCandidate(item.content) : '',
-      status: ensurePitCandidateStatusValue(item.status)
-    }))
-    .filter((item) => item.content.length > 0);
-
-  return {
-    existingItems: Array.from(new Map(existingItems.map((item) => [item.candidateId, item])).values()),
-    newItems: Array.from(new Map(newItems.map((item) => [item.content, item])).values())
-  };
 }
 
 export async function loadChapterAiResources(chapterId: string): Promise<LoadedChapterAiResources> {
