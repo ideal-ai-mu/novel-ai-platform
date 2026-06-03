@@ -345,11 +345,6 @@ export type StoryPitChapterGroup = {
   pits: StoryPitView[];
 };
 
-export type PitGroupedByProjectResult = {
-  chapterGroups: StoryPitChapterGroup[];
-  manualPits: StoryPitView[];
-};
-
 export type ChapterPitPlan = {
   id: string;
   chapter_id: string;
@@ -567,68 +562,6 @@ export type AiSuggestion = {
   created_at: string;
 };
 
-export type AiExtractOutlineResult = {
-  chapterId: string;
-  candidateOutline: string;
-  provider: string;
-  model: string | null;
-  referenceText: string;
-};
-
-export type AiGenerateChapterField = 'title' | 'goal' | 'next_hook';
-
-export type AiGenerateChapterFieldResult = {
-  chapterId: string;
-  field: AiGenerateChapterField;
-  candidateText: string;
-  provider: string;
-  model: string | null;
-  referenceText: string;
-};
-
-export type AiPitResponseReviewItem = {
-  pitId: string;
-  outcome: ChapterPitReviewOutcome;
-  note: string;
-};
-
-export type AiReviewChapterPitResponsesInput = {
-  chapterId: string;
-  promptText?: string;
-};
-
-export type AiReviewChapterPitResponsesResult = {
-  chapterId: string;
-  items: AiPitResponseReviewItem[];
-  provider: string;
-  model: string | null;
-  referenceText: string;
-};
-
-export type AiPitCandidateReviewItem = {
-  candidateId: string;
-  status: ChapterPitCandidateStatus;
-};
-
-export type AiNewPitCandidateSuggestion = {
-  content: string;
-  status: ChapterPitCandidateStatus;
-};
-
-export type AiReviewChapterPitCandidatesInput = {
-  chapterId: string;
-  promptText?: string;
-};
-
-export type AiReviewChapterPitCandidatesResult = {
-  chapterId: string;
-  existingItems: AiPitCandidateReviewItem[];
-  newItems: AiNewPitCandidateSuggestion[];
-  provider: string;
-  model: string | null;
-  referenceText: string;
-};
-
 export type AiChatRole = 'user' | 'assistant';
 
 export type AiChatMessage = {
@@ -685,14 +618,6 @@ export type AiProviderListModelsInput = {
 
 export type AiProviderListModelsResult = {
   models: string[];
-};
-
-export type ChapterGeneratePitsFromContentResult = {
-  chapterId: string;
-  candidates: string[];
-  provider: string;
-  model: string | null;
-  referenceText: string;
 };
 
 export type ChapterPitSuggestionsResult = {
@@ -785,16 +710,6 @@ export type ChapterDeletePermanentInput = {
   chapterId: string;
 };
 
-export type AiExtractOutlineInput = {
-  chapterId: string;
-  promptText?: string;
-};
-
-export type AiGenerateChapterFieldInput = {
-  chapterId: string;
-  promptText?: string;
-};
-
 export type ChapterRefsGetInput = {
   chapterId: string;
 };
@@ -818,42 +733,8 @@ export type ChapterContextRefsGetInput = {
   chapterId: string;
 };
 
-export type ChapterContextRefAddInput = {
-  chapterId: string;
-  refChapterId: string;
-  mode?: Exclude<ChapterContextRefMode, 'auto'>;
-  weight?: number;
-  note?: string | null;
-};
-
-export type ChapterContextRefRemoveInput = {
-  contextRefId: string;
-};
-
-export type ChapterContextRefUpdateInput = {
-  contextRefId: string;
-  patch: Partial<Pick<ChapterContextRef, 'mode' | 'weight' | 'note'>>;
-};
-
-export type ChapterAutoPickContextRefsInput = {
-  chapterId: string;
-  limit?: number;
-};
-
-export type ChapterListOutlinesByProjectInput = {
-  projectId: string;
-};
-
 export type PitListByProjectInput = {
   projectId: string;
-};
-
-export type PitListGroupedByProjectInput = {
-  projectId: string;
-};
-
-export type PitListAvailableForChapterInput = {
-  chapterId: string;
 };
 
 export type PitCreateManualInput = {
@@ -873,14 +754,6 @@ export type PitDeleteInput = {
   pitId: string;
 };
 
-export type ChapterListCreatedPitsInput = {
-  chapterId: string;
-};
-
-export type ChapterListResolvedPitsInput = {
-  chapterId: string;
-};
-
 export type ChapterGetPitSuggestionsInput = {
   chapterId: string;
   promptText?: string;
@@ -888,16 +761,6 @@ export type ChapterGetPitSuggestionsInput = {
 
 export type ChapterListPlannedPitsInput = {
   chapterId: string;
-};
-
-export type ChapterPlanPitResponseInput = {
-  chapterId: string;
-  pitId: string;
-};
-
-export type ChapterUnplanPitResponseInput = {
-  chapterId: string;
-  pitId: string;
 };
 
 export type ChapterListPitReviewsInput = {
@@ -911,72 +774,14 @@ export type ChapterReviewPitResponseInput = {
   note?: string | null;
 };
 
-export type ChapterClearPitReviewInput = {
-  chapterId: string;
-  pitId: string;
-};
-
 export type ChapterListPitCandidatesInput = {
   chapterId: string;
-};
-
-export type ChapterCreatePitCandidateManualInput = {
-  chapterId: string;
-  content: string;
-};
-
-export type ChapterPitCandidateUpdatePatch = Partial<Pick<ChapterPitCandidate, 'content' | 'status'>>;
-
-export type ChapterUpdatePitCandidateInput = {
-  candidateId: string;
-  patch: ChapterPitCandidateUpdatePatch;
-};
-
-export type ChapterDeletePitCandidateInput = {
-  candidateId: string;
-};
-
-export type ChapterReviewPitCandidateInput = {
-  chapterId: string;
-  candidateId: string;
-  status: ChapterPitCandidateStatus;
 };
 
 export type ChapterCreatePitFromSuggestionInput = {
   chapterId: string;
   content: string;
   note?: string | null;
-};
-
-export type ChapterCreatePitManualInput = {
-  chapterId: string;
-  content: string;
-  note?: string | null;
-};
-
-export type ChapterCreatePitInput = {
-  chapterId: string;
-  content: string;
-  note?: string | null;
-};
-
-export type ChapterGeneratePitsFromContentInput = {
-  chapterId: string;
-};
-
-export type ChapterApplyGeneratedPitsInput = {
-  chapterId: string;
-  candidates: string[];
-};
-
-export type ChapterResolvePitInput = {
-  chapterId: string;
-  pitId: string;
-};
-
-export type ChapterUnresolvePitInput = {
-  chapterId: string;
-  pitId: string;
 };
 
 export type CharacterCreateInput = {

@@ -34,36 +34,8 @@ export class AIService {
     return this.ensureTextResult('summarizeChapterFromContent', this.provider.summarizeChapterFromContent(payload));
   }
 
-  public generateChapterTitle(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('generateChapterTitle', this.provider.generateChapterTitle(payload));
-  }
-
-  public generateChapterGoal(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('generateChapterGoal', this.provider.generateChapterGoal(payload));
-  }
-
-  public generateChapterNextHook(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('generateChapterNextHook', this.provider.generateChapterNextHook(payload));
-  }
-
   public generateChapterPitsFromContent(payload: PromptPayload): Promise<AiTextResult> {
     return this.ensureTextResult('generateChapterPitsFromContent', this.provider.generateChapterPitsFromContent(payload));
-  }
-
-  public reviewChapterPitResponses(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('reviewChapterPitResponses', this.provider.reviewChapterPitResponses(payload));
-  }
-
-  public reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('reviewChapterPitCandidates', this.provider.reviewChapterPitCandidates(payload));
-  }
-
-  public proposeOutlineUpdate(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('proposeOutlineUpdate', this.provider.proposeOutlineUpdate(payload));
-  }
-
-  public generateChapterSuggestions(payload: PromptPayload): Promise<AiTextResult> {
-    return this.ensureTextResult('generateChapterSuggestions', this.provider.generateChapterSuggestions(payload));
   }
 
   public chat(payload: ChatPromptPayload): Promise<AiTextResult> {

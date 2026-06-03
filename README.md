@@ -67,19 +67,3 @@ npm run typecheck  # 类型检查（主进程 + 渲染层）
 npm run build      # 构建渲染层与主进程到 dist/
 npm run dist       # 打包生成 Windows 安装包（输出到 release/）
 ```
-
-### 发布新版本
-
-打包发布由 GitHub Actions 自动完成：
-
-```bash
-# 1) 修改 package.json 的 version（如 1.0.1）并提交
-# 2) 打一个与版本一致的 tag 并推送，触发 .github/workflows/release.yml
-git tag -a v1.0.1 -m "Novel AI Studio v1.0.1"
-git push origin v1.0.1
-# 3) 等 Actions 跑完，到 Releases 页将草稿（Draft）Publish
-```
-
-## 技术栈
-
-Electron · React · TypeScript · Vite · sql.js（本地 SQLite） · electron-builder。

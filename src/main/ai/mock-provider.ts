@@ -191,36 +191,8 @@ export class MockAiProvider implements AiProvider {
     return { provider: this.name, model: 'mock-outline-v7', text: summarizeFromContent(payload) };
   }
 
-  public async generateChapterTitle(payload: PromptPayload): Promise<AiTextResult> {
-    return { provider: this.name, model: 'mock-title-v4', text: titleFromContext(payload) };
-  }
-
-  public async generateChapterGoal(payload: PromptPayload): Promise<AiTextResult> {
-    return { provider: this.name, model: 'mock-goal-v4', text: goalFromContext(payload) };
-  }
-
-  public async generateChapterNextHook(payload: PromptPayload): Promise<AiTextResult> {
-    return { provider: this.name, model: 'mock-next-hook-v3', text: nextHookFromContext(payload) };
-  }
-
   public async generateChapterPitsFromContent(payload: PromptPayload): Promise<AiTextResult> {
     return { provider: this.name, model: 'mock-pits-v4', text: pitSuggestionsFromContext(payload) };
-  }
-
-  public async reviewChapterPitResponses(payload: PromptPayload): Promise<AiTextResult> {
-    return { provider: this.name, model: 'mock-pit-review-v2', text: buildPitResponseReviewJson(payload) };
-  }
-
-  public async reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult> {
-    return { provider: this.name, model: 'mock-pit-candidate-v2', text: buildPitCandidateReviewJson(payload) };
-  }
-
-  public async proposeOutlineUpdate(_payload: PromptPayload): Promise<AiTextResult> {
-    throw new Error('proposeOutlineUpdate is not implemented in the mock provider yet');
-  }
-
-  public async generateChapterSuggestions(_payload: PromptPayload): Promise<AiTextResult> {
-    throw new Error('generateChapterSuggestions is not implemented in the mock provider yet');
   }
 
   public async chat(payload: ChatPromptPayload): Promise<AiTextResult> {

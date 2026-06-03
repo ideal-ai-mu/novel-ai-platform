@@ -41,40 +41,19 @@ import {
   updateChapterRepository
 } from './repositories/chapter-repository';
 import {
-  addChapterContextRefRepository,
-  autoPickChapterContextRefsRepository,
   getChapterContextRefsRepository,
   getChapterRefsRepository,
-  listChapterOutlinesByProjectRepository,
-  removeChapterContextRefRepository,
-  updateChapterContextRefRepository,
   updateChapterRefsRepository
 } from './repositories/context-ref-repository';
 import {
-  applyGeneratedPitsRepository,
-  clearPitReviewRepository,
   createChapterPitFromSuggestionRepository,
-  createChapterPitManualRepository,
-  createChapterPitRepository,
   createManualPitRepository,
-  createPitCandidateManualRepository,
-  deletePitCandidateRepository,
   deletePitRepository,
-  listAvailablePitsForChapterRepository,
-  listChapterCreatedPitsRepository,
   listChapterPitCandidatesRepository,
   listChapterPitReviewsRepository,
   listChapterPlannedPitsRepository,
-  listChapterResolvedPitsRepository,
   listPitsByProjectRepository,
-  listPitsGroupedByProjectRepository,
-  planPitResponseRepository,
-  resolvePitRepository,
-  reviewPitCandidateRepository,
   reviewPitResponseRepository,
-  unplanPitResponseRepository,
-  unresolvePitRepository,
-  updatePitCandidateRepository,
   updatePitRepository
 } from './repositories/pit-repository';
 import {
@@ -406,36 +385,8 @@ export class AppDatabase {
     return getChapterContextRefsRepository(createContextRefRepositoryContext(this.createCoreContext()), input);
   }
 
-  public addChapterContextRef(input: Ipc.ChapterContextRefAddInput): Ipc.ChapterContextRefView[] {
-    return addChapterContextRefRepository(createContextRefRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public updateChapterContextRef(input: Ipc.ChapterContextRefUpdateInput): Ipc.ChapterContextRefView[] {
-    return updateChapterContextRefRepository(createContextRefRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public removeChapterContextRef(input: Ipc.ChapterContextRefRemoveInput): Ipc.DeleteResult {
-    return removeChapterContextRefRepository(createContextRefRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public autoPickChapterContextRefs(input: Ipc.ChapterAutoPickContextRefsInput): Ipc.ChapterContextRefView[] {
-    return autoPickChapterContextRefsRepository(createContextRefRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public listChapterOutlinesByProject(projectId: string): Ipc.ChapterOutlineOverviewItem[] {
-    return listChapterOutlinesByProjectRepository(createContextRefRepositoryContext(this.createCoreContext()), projectId);
-  }
-
   public listPitsByProject(input: Ipc.PitListByProjectInput): Ipc.StoryPitView[] {
     return listPitsByProjectRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public listPitsGroupedByProject(input: Ipc.PitListGroupedByProjectInput): Ipc.PitGroupedByProjectResult {
-    return listPitsGroupedByProjectRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public listAvailablePitsForChapter(input: Ipc.PitListAvailableForChapterInput): Ipc.StoryPitView[] {
-    return listAvailablePitsForChapterRepository(createPitRepositoryContext(this.createCoreContext()), input);
   }
 
   public createManualPit(input: Ipc.PitCreateManualInput): Ipc.StoryPitView {
@@ -450,24 +401,8 @@ export class AppDatabase {
     return deletePitRepository(createPitRepositoryContext(this.createCoreContext()), input);
   }
 
-  public listChapterCreatedPits(input: Ipc.ChapterListCreatedPitsInput): Ipc.StoryPitView[] {
-    return listChapterCreatedPitsRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public listChapterResolvedPits(input: Ipc.ChapterListResolvedPitsInput): Ipc.StoryPitView[] {
-    return listChapterResolvedPitsRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
   public listChapterPlannedPits(input: Ipc.ChapterListPlannedPitsInput): Ipc.ChapterPitPlanView[] {
     return listChapterPlannedPitsRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public planPitResponse(input: Ipc.ChapterPlanPitResponseInput): Ipc.ChapterPitPlanView[] {
-    return planPitResponseRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public unplanPitResponse(input: Ipc.ChapterUnplanPitResponseInput): Ipc.DeleteResult {
-    return unplanPitResponseRepository(createPitRepositoryContext(this.createCoreContext()), input);
   }
 
   public listChapterPitReviews(input: Ipc.ChapterListPitReviewsInput): Ipc.ChapterPitReviewView[] {
@@ -478,52 +413,12 @@ export class AppDatabase {
     return reviewPitResponseRepository(createPitRepositoryContext(this.createCoreContext()), input);
   }
 
-  public clearPitReview(input: Ipc.ChapterClearPitReviewInput): Ipc.DeleteResult {
-    return clearPitReviewRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
   public listChapterPitCandidates(input: Ipc.ChapterListPitCandidatesInput): Ipc.ChapterPitCandidate[] {
     return listChapterPitCandidatesRepository(createPitRepositoryContext(this.createCoreContext()), input);
   }
 
-  public createPitCandidateManual(input: Ipc.ChapterCreatePitCandidateManualInput): Ipc.ChapterPitCandidate {
-    return createPitCandidateManualRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public updatePitCandidate(input: Ipc.ChapterUpdatePitCandidateInput): Ipc.ChapterPitCandidate {
-    return updatePitCandidateRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public deletePitCandidate(input: Ipc.ChapterDeletePitCandidateInput): Ipc.DeleteResult {
-    return deletePitCandidateRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public reviewPitCandidate(input: Ipc.ChapterReviewPitCandidateInput): Ipc.ChapterPitCandidate {
-    return reviewPitCandidateRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public createChapterPit(input: Ipc.ChapterCreatePitInput): Ipc.StoryPitView {
-    return createChapterPitRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public createChapterPitManual(input: Ipc.ChapterCreatePitManualInput): Ipc.StoryPitView {
-    return createChapterPitManualRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
   public createChapterPitFromSuggestion(input: Ipc.ChapterCreatePitFromSuggestionInput): Ipc.StoryPitView {
     return createChapterPitFromSuggestionRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public applyGeneratedPits(input: Ipc.ChapterApplyGeneratedPitsInput): Ipc.StoryPitView[] {
-    return applyGeneratedPitsRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public resolvePit(input: Ipc.ChapterResolvePitInput): Ipc.StoryPitView {
-    return resolvePitRepository(createPitRepositoryContext(this.createCoreContext()), input);
-  }
-
-  public unresolvePit(input: Ipc.ChapterUnresolvePitInput): Ipc.StoryPitView {
-    return unresolvePitRepository(createPitRepositoryContext(this.createCoreContext()), input);
   }
 
   public listCharacters(projectId: string): Ipc.Character[] {

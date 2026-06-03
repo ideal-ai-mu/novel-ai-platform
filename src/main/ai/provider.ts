@@ -13,14 +13,7 @@ import type {
 
 export type AiTaskType =
   | 'summarizeChapterFromContent'
-  | 'generateChapterTitle'
-  | 'generateChapterGoal'
-  | 'generateChapterNextHook'
-  | 'generateChapterPitsFromContent'
-  | 'reviewChapterPitResponses'
-  | 'reviewChapterPitCandidates'
-  | 'proposeOutlineUpdate'
-  | 'generateChapterSuggestions';
+  | 'generateChapterPitsFromContent';
 
 export type ChapterAiContext = {
   taskType: AiTaskType;
@@ -133,14 +126,7 @@ export type ChatPromptPayload = {
 export interface AiProvider {
   readonly name: string;
   summarizeChapterFromContent(payload: PromptPayload): Promise<AiTextResult>;
-  generateChapterTitle(payload: PromptPayload): Promise<AiTextResult>;
-  generateChapterGoal(payload: PromptPayload): Promise<AiTextResult>;
-  generateChapterNextHook(payload: PromptPayload): Promise<AiTextResult>;
   generateChapterPitsFromContent(payload: PromptPayload): Promise<AiTextResult>;
-  reviewChapterPitResponses(payload: PromptPayload): Promise<AiTextResult>;
-  reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult>;
-  proposeOutlineUpdate(payload: PromptPayload): Promise<AiTextResult>;
-  generateChapterSuggestions(payload: PromptPayload): Promise<AiTextResult>;
   chat(payload: ChatPromptPayload): Promise<AiTextResult>;
 }
 

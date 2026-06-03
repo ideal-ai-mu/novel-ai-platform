@@ -86,67 +86,12 @@ function buildSectionsForTask(context: ChapterAiContext): PromptSection[] {
   switch (context.taskType) {
     case 'summarizeChapterFromContent':
       return [buildSection('当前正文', context.chapter.content)];
-    case 'generateChapterTitle':
-      return [
-        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
-        buildSection('本章目标', context.chapter.goal),
-        buildSection('章末钩子 / 下一章引子', context.chapter.nextHook),
-        buildSection('已关联角色', formatCharacters(context)),
-        buildSection('已关联设定', formatLore(context)),
-        buildSection('参考章节', formatReferenceChapters(context)),
-        buildSection('本章线索', formatPlannedPits(context)),
-        buildSection('本章伏笔', formatForeshadowNotes(context)),
-        buildSection('正文摘要预览', compactText(context.chapter.content, 500))
-      ];
-    case 'generateChapterGoal':
-      return [
-        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
-        buildSection('章末钩子 / 下一章引子', context.chapter.nextHook),
-        buildSection('已关联角色', formatCharacters(context)),
-        buildSection('已关联设定', formatLore(context)),
-        buildSection('参考章节', formatReferenceChapters(context)),
-        buildSection('本章线索', formatPlannedPits(context)),
-        buildSection('本章伏笔', formatForeshadowNotes(context)),
-        buildSection('正文摘要预览', compactText(context.chapter.content, 500))
-      ];
-    case 'generateChapterNextHook':
-      return [
-        buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
-        buildSection('本章目标', context.chapter.goal),
-        buildSection('当前正文', compactText(context.chapter.content, 1200)),
-        buildSection('本章正式摘要', context.chapter.outlineUser),
-        buildSection('已关联角色', formatCharacters(context)),
-        buildSection('已关联设定', formatLore(context)),
-        buildSection('参考章节', formatReferenceChapters(context)),
-        buildSection('本章线索', formatPlannedPits(context)),
-        buildSection('填坑总结', formatPitReviews(context)),
-        buildSection('本章伏笔', formatForeshadowNotes(context))
-      ];
     case 'generateChapterPitsFromContent':
       return [
         buildSection('当前章节', `第 ${context.chapter.number} 章《${context.chapter.title || '未命名章节'}》`),
         buildSection('本章目标', context.chapter.goal),
         buildSection('章末钩子 / 下一章引子', context.chapter.nextHook),
         buildSection('当前正文', compactText(context.chapter.content, 1500))
-      ];
-    case 'reviewChapterPitResponses':
-      return [
-        buildSection('当前正文', compactText(context.chapter.content, 1500)),
-        buildSection('本章计划回应坑', formatPlannedPits(context))
-      ];
-    case 'reviewChapterPitCandidates':
-      return [
-        buildSection('当前正文', compactText(context.chapter.content, 1800))
-      ];
-    case 'proposeOutlineUpdate':
-      return [
-        buildSection('当前正文', compactText(context.chapter.content, 1500)),
-        buildSection('当前摘要', context.chapter.outlineUser)
-      ];
-    case 'generateChapterSuggestions':
-      return [
-        buildSection('当前正文', compactText(context.chapter.content, 1500)),
-        buildSection('参考章节', formatReferenceChapters(context))
       ];
     default:
       return [buildSection('当前正文', compactText(context.chapter.content, 1500))];
@@ -157,18 +102,8 @@ function buildSystemPrompt(taskType: AiTaskType): string {
   switch (taskType) {
     case 'summarizeChapterFromContent':
       return '你是小说编辑助手。只基于提供的当前正文生成一段“本章摘要”。不要重复原文，不要编造不存在的信息。';
-    case 'generateChapterTitle':
-      return '你是小说编辑助手。请基于上下文给出一个简洁、有辨识度的章节标题候选，仅输出标题文本本身。';
-    case 'generateChapterGoal':
-      return '你是小说编辑助手。请基于上下文给出一个清晰的本章目标候选，仅输出一段目标文本。';
-    case 'generateChapterNextHook':
-      return '你是小说编辑助手。请基于上下文给出一个章末钩子候选，强调下一章牵引力。仅输出候选文本。';
     case 'generateChapterPitsFromContent':
       return '你是小说编辑助手。请基于当前章节正文提炼 2-4 条可作为后续伏笔/未解线索的候选，每行一条。';
-    case 'reviewChapterPitResponses':
-      return '你是小说写作验收助手。请仅输出 JSON：{"items":[{"pitId":"...","outcome":"none|partial|clear|resolved","note":"..."}]}。pitId 必须来自输入。';
-    case 'reviewChapterPitCandidates':
-      return '你是小说写作验收助手。请仅输出 JSON：{"existingItems":[{"candidateId":"...","status":"draft|weak|confirmed|discarded"}],"newItems":[{"content":"...","status":"weak|confirmed"}]}。根据正文判断“本章伏笔”是否成立，并可补充正文中新出现的有效新坑候选。';
     default:
       return '你是小说编辑助手。请根据输入上下文输出可直接使用的候选文本。';
   }
@@ -188,22 +123,8 @@ function taskLabelFor(taskType: AiTaskType): string {
   switch (taskType) {
     case 'summarizeChapterFromContent':
       return '提炼本章摘要';
-    case 'generateChapterTitle':
-      return '生成章节标题候选';
-    case 'generateChapterGoal':
-      return '生成本章目标候选';
-    case 'generateChapterNextHook':
-      return '生成章末钩子候选';
     case 'generateChapterPitsFromContent':
       return '生成本章伏笔候选';
-    case 'reviewChapterPitResponses':
-      return '生成填坑总结候选';
-    case 'reviewChapterPitCandidates':
-      return '分析埋坑确认候选';
-    case 'proposeOutlineUpdate':
-      return '更新摘要建议';
-    case 'generateChapterSuggestions':
-      return '生成章节建议';
     default:
       return 'AI 任务';
   }

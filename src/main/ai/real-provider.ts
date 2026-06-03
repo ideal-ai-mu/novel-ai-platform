@@ -343,35 +343,7 @@ export class RealAiProvider implements AiProvider {
     return this.runPrompt(payload);
   }
 
-  public generateChapterTitle(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
-  public generateChapterGoal(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
-  public generateChapterNextHook(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
   public generateChapterPitsFromContent(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
-  public reviewChapterPitResponses(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
-  public reviewChapterPitCandidates(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
-  public proposeOutlineUpdate(payload: PromptPayload): Promise<AiTextResult> {
-    return this.runPrompt(payload);
-  }
-
-  public generateChapterSuggestions(payload: PromptPayload): Promise<AiTextResult> {
     return this.runPrompt(payload);
   }
 
